@@ -508,6 +508,22 @@ impl<T: GridCell + Copy + Clone> Grid<T> {
         }
     }
 
+    pub fn clear_viewport(&mut self, template: &T) {
+        let positions = self.num_lines();
+        self.increase_scroll_limit(*positions, template);
+
+        // Rotate the entire line buffer. If there's a scrolling region
+        // active, the bottom lines are restored in the next step.
+        self.raw.rotate(-(*positions as isize));
+
+        // TODO: This doesn't seem needed `self.display_offset = 0;`
+
+        if let Some(ref mut selection) = self.selection {
+            selection.rotate(*positions as isize);
+        }
+        self.url_highlight = None;
+    }
+
     // Completely reset the grid state
     pub fn reset(&mut self, template: &T) {
         // Explicitly purge all lines from history

@@ -1919,7 +1919,9 @@ impl ansi::Handler for Term {
                         .each(|cell| cell.reset(&template));
                 }
             },
-            ansi::ClearMode::All => self.grid.region_mut(..).each(|c| c.reset(&template)),
+            ansi::ClearMode::All => {
+                self.grid.clear_viewport(&template);
+            },
             ansi::ClearMode::Above => {
                 // If clearing more than one line
                 if self.cursor.point.line > Line(1) {
