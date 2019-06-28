@@ -1950,6 +1950,8 @@ impl ansi::Handler for Term {
                 //     display (report/patch by Nicholas Marriott).
                 //
                 // This could be a surefix for clearing the screen if desired.
+                //
+                // TODO: Add config option, or detect ncurses version?
                 if false {
                     self.grid.region_mut(..).each(|c| c.reset(&template));
                 }
