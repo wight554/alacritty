@@ -508,18 +508,24 @@ impl<T: GridCell + Copy + Clone> Grid<T> {
         }
     }
 
-    pub fn clear_viewport(&mut self, template: &T) {
-        let positions = self.num_lines();
-        self.increase_scroll_limit(*positions, template);
+    pub fn clear_viewport(&mut self, template: &T) where T: std::fmt::Debug {
+        // TODO: More efficiently.
+        let mut iter = self.iter_from(Point { line: *self.lines - 1, col: Column(0) });
+        use std::collections::HashSet;
+        let mut nonempty_lines = HashSet::new();
+        while let Some(cell) = iter.next() {
+            if !cell.is_empty() {
+                nonempty_lines.insert(iter.cur.line);
+            }
+        }
+        let positions = nonempty_lines.len();
 
-        // Rotate the entire line buffer. If there's a scrolling region
-        // active, the bottom lines are restored in the next step.
-        self.raw.rotate(-(*positions as isize));
+        self.increase_scroll_limit(positions, template);
+        self.raw.rotate(-(positions as isize));
 
         // TODO: This doesn't seem needed `self.display_offset = 0;`
-
         if let Some(ref mut selection) = self.selection {
-            selection.rotate(*positions as isize);
+            selection.rotate(positions as isize);
         }
         self.url_highlight = None;
     }
@@ -629,6 +635,23 @@ impl<'a, T> Iterator for GridIterator<'a, T> {
             },
             _ => {
                 self.cur.col += Column(1);
+                Some(&self.grid[self.cur.line][self.cur.col])
+            },
+        }
+    }
+}
+
+impl<'a, T> DoubleEndedIterator for GridIterator<'a, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        match self.cur {
+            Point { line, col: Column(0) } if line == self.grid.len() - 1 => None,
+            Point { col, .. } if (col == Column(0)) => {
+                self.cur.line += 1;
+                self.cur.col = self.grid.num_cols() - Column(1);
+                Some(&self.grid[self.cur.line][self.cur.col])
+            },
+            _ => {
+                self.cur.col -= Column(1);
                 Some(&self.grid[self.cur.line][self.cur.col])
             },
         }

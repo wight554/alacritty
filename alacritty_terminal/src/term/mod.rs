@@ -1938,8 +1938,19 @@ impl ansi::Handler for Term {
             },
             ansi::ClearMode::Saved => {
                 self.grid.clear_history();
-                // TODO: Add config option
-                if true {
+                // XXX: `clear` is actually broken, and should be sending
+                // escapes in order: H 2J 3J.
+                //
+                // https://invisible-island.net/ncurses/NEWS.html#index-t20180804
+                //
+                // 20180804
+                //   + improve logic for clear with E3 extension, in case the terminal
+                //     scrolls content onto its saved-lines before actually clearing
+                //     the display, by clearing the saved-lines after clearing the
+                //     display (report/patch by Nicholas Marriott).
+                //
+                // This could be a surefix for clearing the screen if desired.
+                if false {
                     self.grid.region_mut(..).each(|c| c.reset(&template));
                 }
             }
