@@ -479,10 +479,10 @@ impl<T: GridCell + Copy + Clone> Grid<T> {
             }
             self.url_highlight = None;
 
-            // // This next loop swaps "fixed" lines outside of a scroll region
-            // // back into place after the rotation. The work is done in buffer-
-            // // space rather than terminal-space to avoid redundant
-            // // transformations.
+            // This next loop swaps "fixed" lines outside of a scroll region
+            // back into place after the rotation. The work is done in buffer-
+            // space rather than terminal-space to avoid redundant
+            // transformations.
             let fixed_lines = *self.num_lines() - *region.end;
 
             for i in 0..fixed_lines {
