@@ -532,9 +532,6 @@ impl<T: GridCell + Copy + Clone> Grid<T> {
 
     // Completely reset the grid state
     pub fn reset(&mut self, template: &T) {
-        // Explicitly purge all lines from history
-        let shrinkage = self.raw.len() - self.lines.0;
-        self.raw.shrink_lines(shrinkage);
         self.clear_history();
 
         // Reset all visible lines
@@ -565,7 +562,11 @@ impl<T> Grid<T> {
     }
 
     pub fn clear_history(&mut self) {
+        // Explicitly purge all lines from history
+        let shrinkage = self.raw.len() - self.lines.0;
+        self.raw.shrink_lines(shrinkage);
         self.scroll_limit = 0;
+        self.raw.truncate();
     }
 
     #[inline]
