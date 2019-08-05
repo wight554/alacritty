@@ -22,6 +22,23 @@ use crate::index::Line;
 /// Maximum number of invisible lines before buffer is resized
 const TRUNCATE_STEP: usize = 100;
 
+/// +--------------------------------------------+
+/// |                                            |
+/// |                SCROLLBACK                  |
+/// |                                            |
+/// +--------------------------------------------+ <--- visible_lines
+/// |                                            |
+/// |                  VISIBLE                   |
+/// |                                            |
+/// +--------------------------------------------+ <--- zero
+/// |                                            |
+/// |                  EXCESS                    |
+/// |                                            |
+/// +--------------------------------------------+ <--- len (includes both SCROLLBACK regions)
+/// |                                            |
+/// |                SCROLLBACK                  |
+/// |                                            |
+/// +--------------------------------------------+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Storage<T> {
     inner: Vec<Row<T>>,

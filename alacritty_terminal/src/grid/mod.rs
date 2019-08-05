@@ -72,6 +72,37 @@ pub trait GridCell {
 }
 
 /// Represents the terminal display contents
+///
+/// +--------------------------------------------+ <--- lines
+/// |                                            |
+/// |                                            |
+/// |                                            |
+/// |                                            |
+/// |                                            |
+/// |              SCROLLBACK REGION             |
+/// |                                            |
+/// |                                            |
+/// |                                            |
+/// |                                            |
+/// |                                            |
+/// +--------------------------------------------+ <--- raw.visible_lines
+/// |                                            |
+/// |              ABOVE SCROLLING               |
+/// |                   REGION                   |
+/// |                                            |
+/// +--------------------------------------------+ <--- scroll_limit
+/// |                                            |
+/// |              SCROLLING REGION              |
+/// |                                            |
+/// +--------------------------------------------+ <--- display_offset
+/// |                                            |
+/// |              BELOW SCROLLING               |
+/// |                   REGION                   |
+/// |                                            |
+/// +--------------------------------------------+ <--- raw.zero
+///                                              |
+///                                              v
+///                                             cols
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Grid<T> {
     /// Lines in the grid. Each row holds a list of cells corresponding to the
