@@ -27,7 +27,7 @@ pub use self::row::Row;
 #[cfg(test)]
 mod tests;
 
-mod storage;
+pub mod storage;
 use self::storage::Storage;
 
 const MIN_INIT_SIZE: usize = 1_000;
@@ -91,7 +91,7 @@ pub trait GridCell {
 /// |              ABOVE SCROLLING               |
 /// |                   REGION                   |
 /// |                                            |
-/// +--------------------------------------------+ <--- scroll_limit
+/// +--------------------------------------------+ <--- raw.visible_lines + display_offset
 /// |                                            |
 /// |              SCROLLING REGION              |
 /// |                                            |
@@ -115,6 +115,7 @@ pub struct Grid<T> {
 
     /// Number of lines.
     ///
+    /// TODO: this invariant is incorrect.
     /// Invariant: lines is equivalent to raw.len()
     lines: index::Line,
 
@@ -511,6 +512,7 @@ impl<T: GridCell + Copy + Clone> Grid<T> {
     ///
     /// This is the performance-sensitive part of scrolling.
     pub fn scroll_up(&mut self, region: &Range<index::Line>, positions: index::Line, template: &T) {
+        dbg!(&positions, &region, &self);
         if region.start == Line(0) {
             // Update display offset when not pinned to active area
             if self.display_offset != 0 {
@@ -569,7 +571,6 @@ impl<T: GridCell + Copy + Clone> Grid<T> {
         }
         let positions = nonempty_lines.len();
 
-        dbg!(positions, &self, &self.raw);
         self.scroll_up(&(Line(0)..Line(positions)), Line(positions), template);
         self.selection = None;
         self.url_highlight = None;

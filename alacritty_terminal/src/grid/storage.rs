@@ -1,16 +1,3 @@
-/// Wrapper around Vec which supports fast indexing and rotation
-///
-/// The rotation implemented by grid::Storage is a simple integer addition.
-/// Compare with standard library rotation which requires rearranging items in
-/// memory.
-///
-/// As a consequence, the indexing operators need to be reimplemented for this
-/// type to account for the 0th element not always being at the start of the
-/// allocation.
-///
-/// Because certain Vec operations are no longer valid on this type, no Deref
-/// implementation is provided. Anything from Vec that should be exposed must be
-/// done so manually.
 use std::ops::{Index, IndexMut};
 use std::vec::Drain;
 use std::fmt;
@@ -23,27 +10,31 @@ use crate::index::Line;
 /// Maximum number of invisible lines before buffer is resized
 const TRUNCATE_STEP: usize = 100;
 
-/// +--------------------------------------------+
-/// |                                            |
-/// |                SCROLLBACK                  |
-/// |                                            |
-/// +--------------------------------------------+ <--- visible_lines
-/// |                                            |
-/// |                  VISIBLE                   |
-/// |                                            |
-/// +--------------------------------------------+ <--- zero
-/// |                                            |
-/// |                  EXCESS                    |
-/// |                                            |
-/// +--------------------------------------------+ <--- len (includes both SCROLLBACK regions)
-/// |                                            |
-/// |                SCROLLBACK                  |
-/// |                                            |
-/// +--------------------------------------------+
+/// An optimized ring buffer for fast indexing and rotation
+///
+/// The [`Storage::rotate`] and [`Storage::rotate_up`] functions are fast
+/// modular additions on the internal `zero` field. As compared with
+/// [`slice::rotate_left`] which must rearrange items in memory.
+///
+/// As a consequence, both [`Index`] and [`IndexMut`] are reimplemented for this
+/// type to account for the zeroth element not always being at the start of the
+/// allocation.
+///
+/// Because certain [`Vec`] operations are no longer valid on this type, no
+/// [`Deref`](std::ops::Deref) implementation is provided. Anything from `Vec`
+/// that should be exposed must be done so manually.
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Storage<T> {
     inner: Vec<Row<T>>,
+
+    /// Starting point for the storage of rows
+    ///
+    ///
     zero: usize,
+
+    /// An **index** separating the visible and scrollback regions
+    ///
+    /// TODO: Why is this needed in storage, and not just in grid.
     visible_lines: Line,
 
     /// Total number of lines currently active in the terminal (scrollback + visible)
@@ -344,6 +335,59 @@ mod test {
     use crate::grid::row::Row;
     use crate::grid::storage::Storage;
     use crate::index::{Column, Line};
+
+    #[test]
+    fn with_capacity() {
+        let mut storage = Storage::with_capacity(Line(3),
+                                                 Row::new(Column(0), &' '));
+
+        assert_eq!(storage.inner.len(), 3);
+        assert_eq!(storage.len, 3);
+        assert_eq!(storage.zero, 0);
+        assert_eq!(storage.visible_lines, Line(2));
+    }
+
+    #[test]
+    fn indexing() {
+        let mut storage = Storage::with_capacity(Line(3),
+                                                 Row::new(Column(0), &' '));
+
+        storage[0] = Row::new(Column(1), &'0');
+        storage[1] = Row::new(Column(1), &'1');
+        storage[2] = Row::new(Column(1), &'2');
+
+        assert_eq!(storage[0], Row::new(Column(1), &'0'));
+        assert_eq!(storage[1], Row::new(Column(1), &'1'));
+        assert_eq!(storage[2], Row::new(Column(1), &'2'));
+
+        storage.zero += 1;
+
+        assert_eq!(storage[0], Row::new(Column(1), &'1'));
+        assert_eq!(storage[1], Row::new(Column(1), &'2'));
+        assert_eq!(storage[2], Row::new(Column(1), &'0'));
+    }
+
+    #[test]
+    #[should_panic]
+    fn indexing_out_of_bounds() {
+        &Storage::with_capacity(Line(0), Row::new(Column(0), &' '))[1];
+    }
+
+    #[test]
+    fn rotate() {
+        let mut storage = Storage::with_capacity(Line(3),
+                                                 Row::new(Column(0), &' '));
+        storage[0] = Row::new(Column(1), &'0');
+        storage[1] = Row::new(Column(1), &'1');
+        storage[2] = Row::new(Column(1), &'2');
+
+        storage.rotate(2);
+
+        assert_eq!(storage.inner.len(), 3);
+        assert_eq!(storage.len, 3);
+        assert_eq!(storage.zero, 0);
+        assert_eq!(storage.visible_lines, Line(2));
+    }
 
     /// Grow the buffer one line at the end of the buffer
     ///
