@@ -1935,6 +1935,9 @@ impl ansi::Handler for Term {
             },
             ansi::ClearMode::All => {
                 self.grid.clear_viewport(&template);
+
+                // XXX: This is the old code, which currently passes all tests.
+                // self.grid.region_mut(..).each(|c| c.reset(&template));
             },
             ansi::ClearMode::Saved => {
                 self.grid.clear_history();

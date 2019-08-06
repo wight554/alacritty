@@ -558,20 +558,19 @@ impl<T: GridCell + Copy + Clone> Grid<T> {
     }
 
     pub fn clear_viewport(&mut self, template: &T) where T: std::fmt::Debug {
-        // // TODO: More efficiently.
-        // let mut iter = self.iter_from(Point { line: *self.lines - 1, col: Column(0) });
-        // use std::collections::HashSet;
-        // let mut nonempty_lines = HashSet::new();
-        // while let Some(cell) = iter.next() {
-        //     if !cell.is_empty() {
-        //         nonempty_lines.insert(iter.cur.line);
-        //     }
-        // }
-        // let positions = nonempty_lines.len();
-        let positions = *self.lines;
+        // TODO: More efficiently.
+        let mut iter = self.iter_from(Point { line: *self.lines - 1, col: Column(0) });
+        use std::collections::HashSet;
+        let mut nonempty_lines = HashSet::new();
+        while let Some(cell) = iter.next() {
+            if !cell.is_empty() {
+                nonempty_lines.insert(iter.cur.line);
+            }
+        }
+        let positions = nonempty_lines.len();
 
         dbg!(positions, &self, &self.raw);
-        self.scroll_up(&(Line(0)..Line(positions)), Line(positions + self.scroll_limit), template);
+        self.scroll_up(&(Line(0)..Line(positions + 1)), Line(positions), template);
         self.selection = None;
         self.url_highlight = None;
     }
