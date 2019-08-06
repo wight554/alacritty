@@ -612,7 +612,6 @@ impl<T> Grid<T> {
         let shrinkage = self.raw.len() - self.lines.0;
         self.raw.shrink_lines(shrinkage);
         self.scroll_limit = 0;
-        self.raw.truncate();
     }
 
     #[inline]
