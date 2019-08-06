@@ -13,6 +13,7 @@
 /// done so manually.
 use std::ops::{Index, IndexMut};
 use std::vec::Drain;
+use std::fmt;
 
 use static_assertions::assert_eq_size;
 
@@ -39,7 +40,7 @@ const TRUNCATE_STEP: usize = 100;
 /// |                SCROLLBACK                  |
 /// |                                            |
 /// +--------------------------------------------+
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct Storage<T> {
     inner: Vec<Row<T>>,
     zero: usize,
@@ -53,6 +54,21 @@ pub struct Storage<T> {
     /// without any additional insertions.
     #[serde(default)]
     len: usize,
+}
+
+impl<T> fmt::Debug for Storage<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Storage {{ \
+                zero: {}, \
+                visible_lines: {}, \
+                len: {}, \
+                inner.len: {}, \
+            }}",
+            self.zero,
+            self.visible_lines,
+            self.len,
+            self.inner.len())
+    }
 }
 
 impl<T: PartialEq> ::std::cmp::PartialEq for Storage<T> {
@@ -221,8 +237,9 @@ impl<T> Storage<T> {
         }
     }
 
+    // TODO: The a & b lines here seem to start from 0 at the top and grow downwards.
     pub fn swap_lines(&mut self, a: Line, b: Line) {
-        let offset = self.inner.len() + self.zero + *self.visible_lines;
+        let offset = self.zero + *self.visible_lines;
         let a = (offset - *a) % self.inner.len();
         let b = (offset - *b) % self.inner.len();
         self.inner.swap(a, b);

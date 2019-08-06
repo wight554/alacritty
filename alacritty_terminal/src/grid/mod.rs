@@ -16,6 +16,7 @@
 
 use std::cmp::{max, min, Ordering};
 use std::ops::{Deref, Index, IndexMut, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo};
+use std::fmt;
 
 use crate::index::{self, Column, IndexRange, Line, Point};
 use crate::selection::Selection;
@@ -103,7 +104,7 @@ pub trait GridCell {
 ///                                              |
 ///                                              v
 ///                                             cols
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct Grid<T> {
     /// Lines in the grid. Each row holds a list of cells corresponding to the
     /// columns in that row.
@@ -139,6 +140,23 @@ pub struct Grid<T> {
     /// Range for URL hover highlights
     #[serde(default)]
     pub url_highlight: Option<RangeInclusive<index::Linear>>,
+}
+
+impl<T> fmt::Debug for Grid<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Grid {{ \
+                lines: {}, \
+                cols: {}, \
+                display_offset: {}, \
+                scroll_limit: {}, \
+                max_scroll_limit: {}, \
+            }}",
+            self.lines,
+            self.cols,
+            self.display_offset,
+            self.scroll_limit,
+            self.max_scroll_limit)
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -516,16 +534,16 @@ impl<T: GridCell + Copy + Clone> Grid<T> {
             // transformations.
             let fixed_lines = *self.num_lines() - *region.end;
 
-            for i in 0..fixed_lines {
-                self.raw.swap(i, i + *positions);
-            }
+            //for i in 0..fixed_lines {
+            //    self.raw.swap(i, i + *positions);
+            //}
 
-            // Finally, reset recycled lines
-            //
-            // Recycled lines are just above the end of the scrolling region.
-            for i in 0..*positions {
-                self.raw[i + fixed_lines].reset(&template);
-            }
+            //// Finally, reset recycled lines
+            ////
+            //// Recycled lines are just above the end of the scrolling region.
+            //for i in 0..*positions {
+            //    self.raw[i + fixed_lines].reset(&template);
+            //}
         } else {
             // Subregion rotation
             for line in IndexRange(region.start..(region.end - positions)) {
@@ -540,6 +558,7 @@ impl<T: GridCell + Copy + Clone> Grid<T> {
     }
 
     pub fn clear_viewport(&mut self, template: &T) where T: std::fmt::Debug {
+        dbg!(&self, &self.raw);
         // TODO: More efficiently.
         let mut iter = self.iter_from(Point { line: *self.lines - 1, col: Column(0) });
         use std::collections::HashSet;
