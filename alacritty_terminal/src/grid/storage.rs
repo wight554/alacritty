@@ -237,9 +237,8 @@ impl<T> Storage<T> {
         }
     }
 
-    // TODO: The a & b lines here seem to start from 0 at the top and grow downwards.
     pub fn swap_lines(&mut self, a: Line, b: Line) {
-        let offset = self.zero + *self.visible_lines;
+        let offset = self.inner.len() + self.zero + *self.visible_lines;
         let a = (offset - *a) % self.inner.len();
         let b = (offset - *b) % self.inner.len();
         self.inner.swap(a, b);
