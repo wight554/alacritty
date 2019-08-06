@@ -534,16 +534,16 @@ impl<T: GridCell + Copy + Clone> Grid<T> {
             // transformations.
             let fixed_lines = *self.num_lines() - *region.end;
 
-            //for i in 0..fixed_lines {
-            //    self.raw.swap(i, i + *positions);
-            //}
+            for i in 0..fixed_lines {
+                self.raw.swap(i, i + *positions);
+            }
 
-            //// Finally, reset recycled lines
-            ////
-            //// Recycled lines are just above the end of the scrolling region.
-            //for i in 0..*positions {
-            //    self.raw[i + fixed_lines].reset(&template);
-            //}
+            // Finally, reset recycled lines
+            //
+            // Recycled lines are just above the end of the scrolling region.
+            for i in 0..*positions {
+                self.raw[i + fixed_lines].reset(&template);
+            }
         } else {
             // Subregion rotation
             for line in IndexRange(region.start..(region.end - positions)) {
@@ -558,25 +558,21 @@ impl<T: GridCell + Copy + Clone> Grid<T> {
     }
 
     pub fn clear_viewport(&mut self, template: &T) where T: std::fmt::Debug {
-        dbg!(&self, &self.raw);
-        // TODO: More efficiently.
-        let mut iter = self.iter_from(Point { line: *self.lines - 1, col: Column(0) });
-        use std::collections::HashSet;
-        let mut nonempty_lines = HashSet::new();
-        while let Some(cell) = iter.next() {
-            if !cell.is_empty() {
-                nonempty_lines.insert(iter.cur.line);
-            }
-        }
-        let positions = nonempty_lines.len();
+        // // TODO: More efficiently.
+        // let mut iter = self.iter_from(Point { line: *self.lines - 1, col: Column(0) });
+        // use std::collections::HashSet;
+        // let mut nonempty_lines = HashSet::new();
+        // while let Some(cell) = iter.next() {
+        //     if !cell.is_empty() {
+        //         nonempty_lines.insert(iter.cur.line);
+        //     }
+        // }
+        // let positions = nonempty_lines.len();
+        let positions = *self.lines;
 
-        self.increase_scroll_limit(positions, template);
-        self.raw.rotate(-(positions as isize));
-
-        // TODO: This doesn't seem needed `self.display_offset = 0;`
-        if let Some(ref mut selection) = self.selection {
-            selection.rotate(positions as isize);
-        }
+        dbg!(positions, &self, &self.raw);
+        self.scroll_up(&(Line(0)..Line(positions)), Line(positions + self.scroll_limit), template);
+        self.selection = None;
         self.url_highlight = None;
     }
 
