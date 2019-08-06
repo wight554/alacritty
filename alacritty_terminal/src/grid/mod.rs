@@ -570,7 +570,7 @@ impl<T: GridCell + Copy + Clone> Grid<T> {
         let positions = nonempty_lines.len();
 
         dbg!(positions, &self, &self.raw);
-        self.scroll_up(&(Line(0)..Line(positions + 1)), Line(positions), template);
+        self.scroll_up(&(Line(0)..Line(positions)), Line(positions), template);
         self.selection = None;
         self.url_highlight = None;
     }
