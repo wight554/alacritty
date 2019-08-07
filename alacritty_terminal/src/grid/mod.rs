@@ -512,7 +512,6 @@ impl<T: GridCell + Copy + Clone> Grid<T> {
     ///
     /// This is the performance-sensitive part of scrolling.
     pub fn scroll_up(&mut self, region: &Range<index::Line>, positions: index::Line, template: &T) {
-        dbg!(&positions, &region, &self);
         if region.start == Line(0) {
             // Update display offset when not pinned to active area
             if self.display_offset != 0 {
