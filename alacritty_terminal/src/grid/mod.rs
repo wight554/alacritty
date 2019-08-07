@@ -568,9 +568,12 @@ impl<T: GridCell + Copy + Clone> Grid<T> {
                 nonempty_lines.insert(iter.cur.line);
             }
         }
-        let positions = nonempty_lines.len();
 
-        self.scroll_up(&(Line(0)..Line(positions)), Line(positions), template);
+        // TODO: why is `yes` correct with `+ 1` but `seq` is correct without?
+        let positions = nonempty_lines.len() + 1;
+        let region = Line(0)..self.num_lines();
+
+        self.scroll_up(&region, Line(positions), template);
         self.selection = None;
         self.url_highlight = None;
     }
