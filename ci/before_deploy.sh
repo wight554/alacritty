@@ -9,7 +9,7 @@ aux_files=("extra/completions/alacritty.bash"
            "alacritty.yml")
 
 # Output binary name
-name="Alacritty-${TRAVIS_TAG}"
+name="Alacritty-${TRAVIS_COMMIT:0:7}"
 
 # Everything in this directory will be offered as download for the release
 mkdir "./target/deploy"
