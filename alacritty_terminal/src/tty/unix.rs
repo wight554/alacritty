@@ -15,12 +15,13 @@
 //! tty related functionality
 
 use crate::config::{Config, Shell};
-use crate::display::OnResize;
+use crate::event::OnResize;
 use crate::term::SizeInfo;
 use crate::tty::{ChildEvent, EventedPty, EventedReadWrite};
 use mio;
 
 use libc::{self, c_int, pid_t, winsize, TIOCSCTTY};
+use log::error;
 use nix::pty::openpty;
 use signal_hook::{self as sighook, iterator::Signals};
 
@@ -133,24 +134,8 @@ pub struct Pty {
     signals_token: mio::Token,
 }
 
-impl Pty {
-    /// Resize the pty
-    ///
-    /// Tells the kernel that the window size changed with the new pixel
-    /// dimensions and line/column counts.
-    pub fn resize<T: ToWinsize>(&self, size: &T) {
-        let win = size.to_winsize();
-
-        let res = unsafe { libc::ioctl(self.fd.as_raw_fd(), libc::TIOCSWINSZ, &win as *const _) };
-
-        if res < 0 {
-            die!("ioctl TIOCSWINSZ failed: {}", io::Error::last_os_error());
-        }
-    }
-}
-
 /// Create a new tty and return a handle to interact with it.
-pub fn new<T: ToWinsize>(config: &Config, size: &T, window_id: Option<usize>) -> Pty {
+pub fn new<C>(config: &Config<C>, size: &SizeInfo, window_id: Option<usize>) -> Pty {
     let win_size = size.to_winsize();
     let mut buf = [0; 1024];
     let pw = get_pw_entry(&mut buf);
@@ -241,7 +226,7 @@ pub fn new<T: ToWinsize>(config: &Config, size: &T, window_id: Option<usize>) ->
                 signals,
                 signals_token: mio::Token::from(0),
             };
-            pty.resize(size);
+            pty.fd.as_raw_fd().on_resize(size);
             pty
         },
         Err(err) => {
@@ -365,6 +350,10 @@ impl<'a> ToWinsize for &'a SizeInfo {
 }
 
 impl OnResize for i32 {
+    /// Resize the pty
+    ///
+    /// Tells the kernel that the window size changed with the new pixel
+    /// dimensions and line/column counts.
     fn on_resize(&mut self, size: &SizeInfo) {
         let win = size.to_winsize();
 
