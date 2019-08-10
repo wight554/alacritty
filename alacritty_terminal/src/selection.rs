@@ -39,6 +39,7 @@ use crate::term::{Search, Term};
 /// [`simple`]: enum.Selection.html#method.simple
 /// [`semantic`]: enum.Selection.html#method.semantic
 /// [`lines`]: enum.Selection.html#method.lines
+/// [`update`]: enum.Selection.html#method.update
 #[derive(Debug, Clone, PartialEq)]
 pub enum Selection {
     Simple {
@@ -151,7 +152,7 @@ impl Selection {
         }
     }
 
-    pub fn to_span(&self, term: &Term) -> Option<Span> {
+    pub fn to_span<T>(&self, term: &Term<T>) -> Option<Span> {
         // Get both sides of the selection
         let (mut start, mut end) = match *self {
             Selection::Simple { ref region } | Selection::Block { ref region } => {
@@ -392,13 +393,18 @@ mod test {
 
     use super::{Selection, Span};
     use crate::clipboard::Clipboard;
+    use crate::event::{Event, EventListener};
     use crate::grid::Grid;
     use crate::index::{Column, Line, Point, Side};
-    use crate::message_bar::MessageBuffer;
     use crate::term::cell::{Cell, Flags};
     use crate::term::{SizeInfo, Term};
 
-    fn term(width: usize, height: usize) -> Term {
+    struct Mock;
+    impl EventListener for Mock {
+        fn send_event(&self, _event: Event) {}
+    }
+
+    fn term(width: usize, height: usize) -> Term<Mock> {
         let size = SizeInfo {
             width: width as f32,
             height: height as f32,
@@ -408,7 +414,7 @@ mod test {
             padding_y: 0.0,
             dpr: 1.0,
         };
-        Term::new(&Default::default(), size, MessageBuffer::new(), Clipboard::new_nop())
+        Term::new(&Default::default(), size, Clipboard::new_nop(), Mock)
     }
 
     /// Test case of single cell selection
