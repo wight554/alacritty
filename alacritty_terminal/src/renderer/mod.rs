@@ -22,18 +22,19 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use fnv::FnvHasher;
-use font::{self, FontDesc, FontKey, GlyphKey, Rasterize, RasterizedGlyph, Rasterizer};
-use glutin::dpi::PhysicalSize;
+use font::{self, FontDesc, FontKey, GlyphKey, Rasterize, RasterizedGlyph, Rasterizer, Size};
 use notify::{watcher, DebouncedEvent, RecursiveMode, Watcher};
 
-use crate::config::{self, Config, Delta};
+use crate::config::{self, Config, Delta, StartupMode};
 use crate::cursor::{get_cursor_glyph, CursorKey};
 use crate::gl;
 use crate::gl::types::*;
 use crate::index::{Column, Line};
 use crate::renderer::rects::RenderRect;
 use crate::term::color::Rgb;
+use crate::term::SizeInfo;
 use crate::term::{self, cell, RenderableCell, RenderableCellContent};
+use crate::util;
 
 pub mod rects;
 
@@ -283,12 +284,6 @@ impl GlyphCache {
         FontDesc::new(desc.family.clone(), style)
     }
 
-    pub fn font_metrics(&self) -> font::Metrics {
-        self.rasterizer
-            .metrics(self.font_key, self.font_size)
-            .expect("metrics load since font is loaded at glyph cache creation")
-    }
-
     pub fn get<'a, L>(&'a mut self, glyph_key: GlyphKey, loader: &mut L) -> &'a Glyph
     where
         L: LoadGlyph,
@@ -310,8 +305,7 @@ impl GlyphCache {
 
     pub fn update_font_size<L: LoadGlyph>(
         &mut self,
-        font: &config::Font,
-        size: font::Size,
+        font: config::Font,
         dpr: f64,
         loader: &mut L,
     ) -> Result<(), font::Error> {
@@ -324,12 +318,11 @@ impl GlyphCache {
         self.rasterizer.update_dpr(dpr as f32);
 
         // Recompute font keys
-        let font = font.to_owned().with_size(size);
         let (regular, bold, italic, bold_italic) =
             Self::compute_font_keys(&font, &mut self.rasterizer)?;
 
         self.rasterizer.get_glyph(GlyphKey { font_key: regular, c: 'm', size: font.size })?;
-        let metrics = self.rasterizer.metrics(regular, size)?;
+        let metrics = self.rasterizer.metrics(regular, font.size)?;
 
         info!("Font size changed to {:?} with DPR of {}", font.size, dpr);
 
@@ -348,19 +341,64 @@ impl GlyphCache {
         Ok(())
     }
 
+    pub fn font_metrics(&self) -> font::Metrics {
+        self.rasterizer
+            .metrics(self.font_key, self.font_size)
+            .expect("metrics load since font is loaded at glyph cache creation")
+    }
+
     // Calculate font metrics without access to a glyph cache
-    //
-    // This should only be used *before* OpenGL is initialized and the glyph cache can be filled.
-    pub fn static_metrics(config: &Config, dpr: f32) -> Result<font::Metrics, font::Error> {
+    pub fn static_metrics(
+        config: &Config,
+        font_size: Size,
+        dpr: f64,
+    ) -> Result<font::Metrics, font::Error> {
         let font = config.font.clone();
 
-        let mut rasterizer = font::Rasterizer::new(dpr, config.font.use_thin_strokes())?;
+        let mut rasterizer = font::Rasterizer::new(dpr as f32, config.font.use_thin_strokes())?;
         let regular_desc =
             GlyphCache::make_desc(&font.normal(), font::Slant::Normal, font::Weight::Normal);
-        let regular = rasterizer.load_font(&regular_desc, font.size)?;
-        rasterizer.get_glyph(GlyphKey { font_key: regular, c: 'm', size: font.size })?;
+        let regular = rasterizer.load_font(&regular_desc, font_size)?;
+        rasterizer.get_glyph(GlyphKey { font_key: regular, c: 'm', size: font_size })?;
 
-        rasterizer.metrics(regular, font.size)
+        rasterizer.metrics(regular, font_size)
+    }
+
+    pub fn compute_cell_size(config: &Config, metrics: &font::Metrics) -> (f32, f32) {
+        let offset_x = f64::from(config.font.offset.x);
+        let offset_y = f64::from(config.font.offset.y);
+        (
+            f32::max(1., ((metrics.average_advance + offset_x) as f32).floor()),
+            f32::max(1., ((metrics.line_height + offset_y) as f32).floor()),
+        )
+    }
+
+    pub fn calculate_dimensions(
+        config: &Config,
+        dpr: f64,
+        cell_width: f32,
+        cell_height: f32,
+    ) -> Option<(f64, f64)> {
+        let dimensions = config.window.dimensions;
+
+        if dimensions.columns_u32() == 0
+            || dimensions.lines_u32() == 0
+            || config.window.startup_mode() != StartupMode::Windowed
+        {
+            return None;
+        }
+
+        let padding_x = f64::from(config.window.padding.x) * dpr;
+        let padding_y = f64::from(config.window.padding.y) * dpr;
+
+        // Calculate new size based on cols/lines specified in config
+        let grid_width = cell_width as u32 * dimensions.columns_u32();
+        let grid_height = cell_height as u32 * dimensions.lines_u32();
+
+        let width = (f64::from(grid_width) + 2. * padding_x).floor();
+        let height = (f64::from(grid_height) + 2. * padding_y).floor();
+
+        Some((width, height))
     }
 }
 
@@ -416,7 +454,8 @@ pub struct RenderApi<'a> {
     atlas: &'a mut Vec<Atlas>,
     current_atlas: &'a mut usize,
     program: &'a mut TextShaderProgram,
-    config: &'a Config,
+    font_offset: (i8, i8),
+    background_opacity: f32,
 }
 
 #[derive(Debug)]
@@ -444,7 +483,7 @@ impl Batch {
         Batch { tex: 0, instances: Vec::with_capacity(BATCH_MAX) }
     }
 
-    pub fn add_item(&mut self, cell: &RenderableCell, glyph: &Glyph) {
+    pub fn add_item(&mut self, cell: RenderableCell, glyph: &Glyph) {
         if self.is_empty() {
             self.tex = glyph.tex_id;
         }
@@ -638,7 +677,7 @@ impl QuadRenderer {
         let (msg_tx, msg_rx) = mpsc::channel();
 
         if cfg!(feature = "live-shader-reload") {
-            ::std::thread::spawn(move || {
+            util::thread::spawn_named("live shader reload", move || {
                 let (tx, rx) = ::std::sync::mpsc::channel();
                 // The Duration argument is a debouncing period.
                 let mut watcher =
@@ -690,8 +729,8 @@ impl QuadRenderer {
     // Draw all rectangles simultaneously to prevent excessive program swaps
     pub fn draw_rects(
         &mut self,
-        config: &Config,
         props: &term::SizeInfo,
+        visual_bell_color: Rgb,
         visual_bell_intensity: f64,
         cell_line_rects: Vec<RenderRect>,
     ) {
@@ -723,8 +762,7 @@ impl QuadRenderer {
         }
 
         // Draw visual bell
-        let color = config.visual_bell.color;
-        let rect = RenderRect::new(0., 0., props.width, props.height, color);
+        let rect = RenderRect::new(0., 0., props.width, props.height, visual_bell_color);
         self.render_rect(&rect, visual_bell_intensity as f32, props);
 
         // Draw underlines and strikeouts
@@ -752,7 +790,13 @@ impl QuadRenderer {
         }
     }
 
-    pub fn with_api<F, T>(&mut self, config: &Config, props: &term::SizeInfo, func: F) -> T
+    pub fn with_api<F, T>(
+        &mut self,
+        props: &term::SizeInfo,
+        background_opacity: f32,
+        font_offset: (i8, i8),
+        func: F,
+    ) -> T
     where
         F: FnOnce(RenderApi<'_>) -> T,
     {
@@ -778,7 +822,8 @@ impl QuadRenderer {
             atlas: &mut self.atlas,
             current_atlas: &mut self.current_atlas,
             program: &mut self.program,
-            config,
+            background_opacity,
+            font_offset,
         });
 
         unsafe {
@@ -837,25 +882,19 @@ impl QuadRenderer {
         self.rect_program = rect_program;
     }
 
-    pub fn resize(&mut self, size: PhysicalSize, padding_x: f32, padding_y: f32) {
-        let (width, height): (u32, u32) = size.into();
-
+    pub fn resize(&mut self, size: SizeInfo) {
         // viewport
         unsafe {
-            let width = width as i32;
-            let height = height as i32;
-            let padding_x = padding_x as i32;
-            let padding_y = padding_y as i32;
-            gl::Viewport(padding_x, padding_y, width - 2 * padding_x, height - 2 * padding_y);
+            gl::Viewport(
+                size.padding_x as i32,
+                size.padding_y as i32,
+                size.width as i32 - 2 * size.padding_x as i32,
+                size.height as i32 - 2 * size.padding_y as i32,
+            );
 
             // update projection
             gl::UseProgram(self.program.id);
-            self.program.update_projection(
-                width as f32,
-                height as f32,
-                padding_x as f32,
-                padding_y as f32,
-            );
+            self.program.update_projection(size.width, size.height, size.padding_x, size.padding_y);
             gl::UseProgram(0);
         }
     }
@@ -900,13 +939,12 @@ impl QuadRenderer {
 
 impl<'a> RenderApi<'a> {
     pub fn clear(&self, color: Rgb) {
-        let alpha = self.config.background_opacity();
         unsafe {
             gl::ClearColor(
-                (f32::from(color.r) / 255.0).min(1.0) * alpha,
-                (f32::from(color.g) / 255.0).min(1.0) * alpha,
-                (f32::from(color.b) / 255.0).min(1.0) * alpha,
-                alpha,
+                (f32::from(color.r) / 255.0).min(1.0) * self.background_opacity,
+                (f32::from(color.g) / 255.0).min(1.0) * self.background_opacity,
+                (f32::from(color.b) / 255.0).min(1.0) * self.background_opacity,
+                self.background_opacity,
             );
             gl::Clear(gl::COLOR_BUFFER_BIT);
         }
@@ -988,7 +1026,7 @@ impl<'a> RenderApi<'a> {
     }
 
     #[inline]
-    fn add_render_item(&mut self, cell: &RenderableCell, glyph: &Glyph) {
+    fn add_render_item(&mut self, cell: RenderableCell, glyph: &Glyph) {
         // Flush batch if tex changing
         if !self.batch.is_empty() && self.batch.tex != glyph.tex_id {
             self.render_batch();
@@ -1008,18 +1046,15 @@ impl<'a> RenderApi<'a> {
                 // Raw cell pixel buffers like cursors don't need to go through font lookup
                 let metrics = glyph_cache.metrics;
                 let glyph = glyph_cache.cursor_cache.entry(cursor_key).or_insert_with(|| {
-                    let offset_x = self.config.font.offset.x;
-                    let offset_y = self.config.font.offset.y;
-
                     self.load_glyph(&get_cursor_glyph(
                         cursor_key.style,
                         metrics,
-                        offset_x,
-                        offset_y,
+                        self.font_offset.0,
+                        self.font_offset.1,
                         cursor_key.is_wide,
                     ))
                 });
-                self.add_render_item(&cell, &glyph);
+                self.add_render_item(cell, &glyph);
                 return;
             },
             RenderableCellContent::Chars(chars) => chars,
@@ -1053,7 +1088,7 @@ impl<'a> RenderApi<'a> {
 
         // Add cell to batch
         let glyph = glyph_cache.get(glyph_key, self);
-        self.add_render_item(&cell, glyph);
+        self.add_render_item(cell, glyph);
 
         // Render zero-width characters
         for c in (&chars[1..]).iter().filter(|c| **c != ' ') {
@@ -1067,7 +1102,7 @@ impl<'a> RenderApi<'a> {
             // anchor has been moved to the right by one cell.
             glyph.left += glyph_cache.metrics.average_advance as f32;
 
-            self.add_render_item(&cell, &glyph);
+            self.add_render_item(cell, &glyph);
         }
     }
 }
