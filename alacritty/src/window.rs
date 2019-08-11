@@ -33,12 +33,12 @@ use glutin::{
 };
 use log::debug;
 
+use alacritty_terminal::config::DEFAULT_NAME;
 use alacritty_terminal::config::{Config, Decorations, StartupMode, WindowConfig};
 use alacritty_terminal::event::Event;
 use alacritty_terminal::gl;
 use alacritty_terminal::renderer::GlyphCache;
 use alacritty_terminal::term::{SizeInfo, Term};
-use alacritty_terminal::config::DEFAULT_NAME;
 
 // It's required to be in this directory due to the `windows.rc` file
 #[cfg(not(target_os = "macos"))]

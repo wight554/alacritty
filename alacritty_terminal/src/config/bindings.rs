@@ -1166,3 +1166,136 @@ impl<'a> de::Deserialize<'a> for ModsWrapper {
         deserializer.deserialize_str(ModsVisitor)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use glutin::event::ModifiersState;
+
+    use crate::config::{Action, Binding};
+    use crate::term::TermMode;
+
+    type MockBinding = Binding<usize>;
+
+    impl Default for MockBinding {
+        fn default() -> Self {
+            Self {
+                mods: Default::default(),
+                action: Default::default(),
+                mode: TermMode::empty(),
+                notmode: TermMode::empty(),
+                trigger: Default::default(),
+            }
+        }
+    }
+
+    #[test]
+    fn binding_matches_itself() {
+        let binding = MockBinding::default();
+        let identical_binding = MockBinding::default();
+
+        assert!(binding.triggers_match(&identical_binding));
+        assert!(identical_binding.triggers_match(&binding));
+    }
+
+    #[test]
+    fn binding_matches_different_action() {
+        let binding = MockBinding::default();
+        let mut different_action = MockBinding::default();
+        different_action.action = Action::ClearHistory;
+
+        assert!(binding.triggers_match(&different_action));
+        assert!(different_action.triggers_match(&binding));
+    }
+
+    #[test]
+    fn subset_mode_binding_matches_superset() {
+        let mut superset_mode = MockBinding::default();
+        superset_mode.mode = TermMode::ALT_SCREEN | TermMode::INSERT | TermMode::ORIGIN;
+        let mut subset_mode = MockBinding::default();
+        subset_mode.mode = TermMode::ALT_SCREEN | TermMode::ORIGIN;
+
+        assert!(superset_mode.triggers_match(&subset_mode));
+        assert!(subset_mode.triggers_match(&superset_mode));
+    }
+
+    #[test]
+    fn subset_notmode_binding_matches_superset() {
+        let mut superset_notmode = MockBinding::default();
+        superset_notmode.notmode = TermMode::ALT_SCREEN | TermMode::INSERT | TermMode::ORIGIN;
+        let mut subset_notmode = MockBinding::default();
+        subset_notmode.notmode = TermMode::ALT_SCREEN | TermMode::ORIGIN;
+
+        assert!(superset_notmode.triggers_match(&subset_notmode));
+        assert!(subset_notmode.triggers_match(&superset_notmode));
+    }
+
+    #[test]
+    fn mods_binding_requires_strict_match() {
+        let mut superset_mods = MockBinding::default();
+        superset_mods.mods = ModifiersState { alt: true, logo: true, ctrl: true, shift: true };
+        let mut subset_mods = MockBinding::default();
+        subset_mods.mods = ModifiersState { alt: true, logo: false, ctrl: false, shift: false };
+
+        assert!(!superset_mods.triggers_match(&subset_mods));
+        assert!(!subset_mods.triggers_match(&superset_mods));
+    }
+
+    #[test]
+    fn binding_trigger_input() {
+        let mut binding = MockBinding::default();
+        binding.trigger = 13;
+
+        let mods = binding.mods;
+        let mode = binding.mode;
+
+        assert!(binding.is_triggered_by(mode, mods, &13, true));
+        assert!(!binding.is_triggered_by(mode, mods, &32, true));
+    }
+
+    #[test]
+    fn binding_trigger_mods() {
+        let mut binding = MockBinding::default();
+        binding.mods = ModifiersState { alt: true, logo: true, ctrl: false, shift: false };
+
+        let superset_mods = ModifiersState { alt: true, logo: true, ctrl: true, shift: true };
+        let subset_mods = ModifiersState { alt: false, logo: false, ctrl: false, shift: false };
+
+        let t = binding.trigger;
+        let mode = binding.mode;
+
+        assert!(binding.is_triggered_by(mode, binding.mods, &t, true));
+        assert!(binding.is_triggered_by(mode, binding.mods, &t, false));
+
+        assert!(binding.is_triggered_by(mode, superset_mods, &t, true));
+        assert!(!binding.is_triggered_by(mode, superset_mods, &t, false));
+
+        assert!(!binding.is_triggered_by(mode, subset_mods, &t, true));
+        assert!(!binding.is_triggered_by(mode, subset_mods, &t, false));
+    }
+
+    #[test]
+    fn binding_trigger_modes() {
+        let mut binding = MockBinding::default();
+        binding.mode = TermMode::ALT_SCREEN;
+
+        let t = binding.trigger;
+        let mods = binding.mods;
+
+        assert!(!binding.is_triggered_by(TermMode::INSERT, mods, &t, true));
+        assert!(binding.is_triggered_by(TermMode::ALT_SCREEN, mods, &t, true));
+        assert!(binding.is_triggered_by(TermMode::ALT_SCREEN | TermMode::INSERT, mods, &t, true));
+    }
+
+    #[test]
+    fn binding_trigger_notmodes() {
+        let mut binding = MockBinding::default();
+        binding.notmode = TermMode::ALT_SCREEN;
+
+        let t = binding.trigger;
+        let mods = binding.mods;
+
+        assert!(binding.is_triggered_by(TermMode::INSERT, mods, &t, true));
+        assert!(!binding.is_triggered_by(TermMode::ALT_SCREEN, mods, &t, true));
+        assert!(!binding.is_triggered_by(TermMode::ALT_SCREEN | TermMode::INSERT, mods, &t, true));
+    }
+}

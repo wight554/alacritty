@@ -5,17 +5,17 @@ use std::env;
 use std::f64;
 #[cfg(unix)]
 use std::fs;
+use std::fs::File;
+use std::io::Write;
 use std::sync::{mpsc, Arc};
 use std::time::Instant;
-use std::io::Write;
-use std::fs::File;
 
 use glutin::dpi::PhysicalSize;
 use glutin::event::{ElementState, Event as GlutinEvent, ModifiersState, MouseButton};
 use glutin::event_loop::{ControlFlow, EventLoop};
 use glutin::platform::desktop::EventLoopExtDesktop;
+use log::{debug, info, warn};
 use serde_json as json;
-use log::{info, debug, warn};
 
 use font::Size;
 
@@ -28,8 +28,8 @@ use alacritty_terminal::index::{Column, Line, Point, Side};
 use alacritty_terminal::message_bar::MessageBuffer;
 use alacritty_terminal::selection::Selection;
 use alacritty_terminal::sync::FairMutex;
-use alacritty_terminal::term::{SizeInfo, Term};
 use alacritty_terminal::term::cell::Cell;
+use alacritty_terminal::term::{SizeInfo, Term};
 use alacritty_terminal::tty;
 use alacritty_terminal::util::{limit, start_daemon};
 
@@ -556,7 +556,7 @@ impl<N: Notify> Processor<N> {
 
                 // Request redraw
                 self.render_tx
-                    .send(RenderEvent::Update(RenderUpdate {
+                    .send(RenderEvent::Update(Box::new(RenderUpdate {
                         visual_bell_intensity: terminal.visual_bell.intensity(),
                         background_color: terminal.background_color(),
                         message_buffer: self.message_buffer.message().map(|m| m.to_owned()),
@@ -564,7 +564,7 @@ impl<N: Notify> Processor<N> {
                         size_info: self.size_info,
                         font_size: self.font_size,
                         config: self.config.clone(),
-                    }))
+                    })))
                     .expect("send render update");
             }
         });

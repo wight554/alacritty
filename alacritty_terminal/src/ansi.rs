@@ -774,7 +774,7 @@ where
 
             // Set icon name
             // This is ignored, since alacritty has no concept of tabs
-            b"1" => return,
+            b"1" => (),
 
             // Set color index
             b"4" => {
@@ -890,6 +890,7 @@ where
     }
 
     #[inline]
+    #[allow(clippy::needless_return)]
     fn csi_dispatch(
         &mut self,
         args: &[i64],
@@ -1083,6 +1084,7 @@ where
     }
 
     #[inline]
+    #[allow(clippy::needless_return)]
     fn esc_dispatch(&mut self, params: &[i64], intermediates: &[u8], _ignore: bool, byte: u8) {
         macro_rules! unhandled {
             () => {{

@@ -42,6 +42,7 @@ use winapi::um::wincon::{AttachConsole, FreeConsole, ATTACH_PARENT_PROCESS};
 
 use alacritty_terminal::clipboard::Clipboard;
 use alacritty_terminal::config::Config;
+use alacritty_terminal::die;
 use alacritty_terminal::event::Event;
 use alacritty_terminal::event_loop::{self, EventLoop, Msg};
 #[cfg(target_os = "macos")]
@@ -52,7 +53,6 @@ use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::Term;
 use alacritty_terminal::tty;
 use alacritty_terminal::util;
-use alacritty_terminal::die;
 
 mod cli;
 mod config;

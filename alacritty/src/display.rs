@@ -106,7 +106,7 @@ impl From<glutin::ContextError> for Error {
 }
 
 pub enum RenderEvent {
-    Update(RenderUpdate),
+    Update(Box<RenderUpdate>),
     Exit,
 }
 
