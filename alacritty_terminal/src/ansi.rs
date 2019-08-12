@@ -19,7 +19,7 @@ use std::str;
 
 use crate::index::{Column, Contains, Line};
 use base64;
-use glutin::MouseCursor;
+use glutin::window::CursorIcon;
 use vte;
 
 use crate::term::color::Rgb;
@@ -118,7 +118,7 @@ struct ProcessorState {
 /// Processor creates a Performer when running advance and passes the Performer
 /// to `vte::Parser`.
 struct Performer<'a, H: Handler + TermInfo, W: io::Write> {
-    _state: &'a mut ProcessorState,
+    state: &'a mut ProcessorState,
     handler: &'a mut H,
     writer: &'a mut W,
 }
@@ -131,7 +131,7 @@ impl<'a, H: Handler + TermInfo + 'a, W: io::Write> Performer<'a, H, W> {
         handler: &'b mut H,
         writer: &'b mut W,
     ) -> Performer<'b, H, W> {
-        Performer { _state: state, handler, writer }
+        Performer { state, handler, writer }
     }
 }
 
@@ -172,7 +172,7 @@ pub trait Handler {
     fn set_title(&mut self, _: &str) {}
 
     /// Set the window's mouse cursor
-    fn set_mouse_cursor(&mut self, _: MouseCursor) {}
+    fn set_mouse_cursor(&mut self, _: CursorIcon) {}
 
     /// Set the cursor style
     fn set_cursor_style(&mut self, _: Option<CursorStyle>) {}
@@ -700,7 +700,7 @@ where
     #[inline]
     fn print(&mut self, c: char) {
         self.handler.input(c);
-        self._state.preceding_char = Some(c);
+        self.state.preceding_char = Some(c);
     }
 
     #[inline]
@@ -774,7 +774,7 @@ where
 
             // Set icon name
             // This is ignored, since alacritty has no concept of tabs
-            b"1" => return,
+            b"1" => (),
 
             // Set color index
             b"4" => {
@@ -890,6 +890,7 @@ where
     }
 
     #[inline]
+    #[allow(clippy::needless_return)]
     fn csi_dispatch(
         &mut self,
         args: &[i64],
@@ -930,7 +931,7 @@ where
                 handler.move_up(Line(arg_or_default!(idx: 0, default: 1) as usize));
             },
             ('b', None) => {
-                if let Some(c) = self._state.preceding_char {
+                if let Some(c) = self.state.preceding_char {
                     for _ in 0..arg_or_default!(idx: 0, default: 1) {
                         handler.input(c);
                     }
@@ -1083,6 +1084,7 @@ where
     }
 
     #[inline]
+    #[allow(clippy::needless_return)]
     fn esc_dispatch(&mut self, params: &[i64], intermediates: &[u8], _ignore: bool, byte: u8) {
         macro_rules! unhandled {
             () => {{

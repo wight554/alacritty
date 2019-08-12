@@ -39,6 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Selecting trailing tab with semantic expansion
 - URL parser incorrectly handling Markdown URLs and angled brackets
 - Intermediate bytes of CSI sequences not checked
+- Background always opaque on Linux
+- Skipping redraws on PTY update
+- Not redrawing while resizing on Windows/macOS
+- Decorations `none` launching an invisible window
 
 ## 0.3.3
 
