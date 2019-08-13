@@ -29,7 +29,9 @@ pub struct Storage<T> {
 
     /// Starting point for the storage of rows
     ///
-    /// TODO: This value must be below the value of `len`.
+    /// This value represents a line offset within the inner buffer. The value of this offset may
+    /// be larger than the inner buffer itself, and will wrap around to the start to form a ring
+    /// buffer.
     zero: usize,
 
     /// An **index** separating the visible and scrollback regions
@@ -391,9 +393,8 @@ mod test {
         storage.rotate(2);
         assert_eq!(storage.zero, 2);
         storage.shrink_lines(2);
-        // TODO: Shouldn't `shrink_lines` update the value of `zero`?
         assert_eq!(storage.len, 1);
-        assert_eq!(storage.zero, 0);
+        assert_eq!(storage.zero, 2);
     }
 
     #[test]
