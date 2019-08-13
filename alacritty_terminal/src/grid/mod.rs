@@ -558,22 +558,27 @@ impl<T: GridCell + Copy + Clone> Grid<T> {
         }
     }
 
-    pub fn clear_viewport(&mut self, template: &T) where T: std::fmt::Debug {
-        // TODO: More efficiently.
-        let mut iter = self.iter_from(Point { line: *self.lines - 1, col: Column(0) });
-        use std::collections::HashSet;
-        let mut nonempty_lines = HashSet::new();
-        while let Some(cell) = iter.next() {
+    pub fn clear_viewport(&mut self, template: &T) {
+        // TODO: More efficiently using occ.
+        let mut iter = self.iter_from(Point { line: 0, col: Column(0) });
+        let mut bottom_nonempty_line = 0;
+        while let Some(cell) = iter.next_back() {
             if !cell.is_empty() {
-                nonempty_lines.insert(iter.cur.line);
+                bottom_nonempty_line = iter.cur.line;
+                break;
+            }
+
+            // In case the whole terminal is empty somehow.
+            // TODO: Test.
+            if iter.cur.line >= *self.lines {
+                break;
             }
         }
 
-        // TODO: why is `yes` correct with `+ 1` but `seq` is correct without?
-        let positions = nonempty_lines.len() + 1;
+        let positions = self.lines - bottom_nonempty_line;
         let region = Line(0)..self.num_lines();
 
-        self.scroll_up(&region, Line(positions), template);
+        self.scroll_up(&region, positions, template);
         self.selection = None;
         self.url_highlight = None;
     }
