@@ -455,7 +455,11 @@ impl<'a, A: ActionContext + 'a> Processor<'a, A> {
             if let Some(url) =
                 self.ctx.terminal().urls().drain(..).find(|url| url.contains(buffer_point))
             {
-                return MouseState::Url(url);
+                if self.ctx.selection_is_empty() &&
+                   self.ctx.mouse().left_button_state != ElementState::Pressed
+                {
+                    return MouseState::Url(url);
+                }
             }
         }
 
@@ -692,6 +696,8 @@ impl<'a, A: ActionContext + 'a> Processor<'a, A> {
             self.mouse_report(code, ElementState::Released, modifiers);
             return;
         } else if let (Some(point), true) = (point, button == MouseButton::Left) {
+            let mouse_state = self.mouse_state(point);
+            self.update_mouse_cursor(mouse_state);
             self.launch_url(modifiers, point);
         }
 
