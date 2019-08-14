@@ -29,9 +29,11 @@ pub struct Storage<T> {
 
     /// Starting point for the storage of rows
     ///
-    /// This value represents a line offset within the inner buffer. The value of this offset may
-    /// be larger than the inner buffer itself, and will wrap around to the start to form a ring
-    /// buffer.
+    /// This value represents the starting line offset within the ring buffer. Doing things this
+    /// way allows for scrolling stored lines in a performant way.
+    ///
+    /// The value of this offset may be larger than the `len` itself, and will wrap around to the
+    /// start to form the ring buffer.
     zero: usize,
 
     /// An **index** separating the visible and scrollback regions
@@ -394,6 +396,7 @@ mod test {
         assert_eq!(storage.zero, 2);
         storage.shrink_lines(2);
         assert_eq!(storage.len, 1);
+        assert_eq!(storage.inner.len(), 3);
         assert_eq!(storage.zero, 2);
     }
 
