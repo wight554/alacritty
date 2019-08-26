@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Config option `window.gtk_theme_variant` to set GTK theme variant
 - Completions for `--class` and `-t` (short title)
 - Change the mouse cursor when hovering over the message bar and its close button
+- Support combined bold and italic text (with `font.bold_italic` to customize it)
 
 ### Changed
 
@@ -40,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - URL parser incorrectly handling Markdown URLs and angled brackets
 - Intermediate bytes of CSI sequences not checked
 - Wayland clipboard integration
+- Use text mouse cursor when mouse mode is temporarily disabled with shift
 
 ## 0.3.3
 
