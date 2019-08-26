@@ -698,6 +698,15 @@ impl<'a, A: ActionContext + 'a> Processor<'a, A> {
         } else if let (Some(point), true) = (point, button == MouseButton::Left) {
             let mouse_state = self.mouse_state(point);
             self.update_mouse_cursor(mouse_state);
+            match mouse_state {
+                MouseState::Url(url) => {
+                    let url_bounds = url.linear_bounds(self.ctx.terminal());
+                    self.ctx.terminal_mut().set_url_highlight(url_bounds);
+                },
+                _ => {
+                    self.ctx.terminal_mut().reset_url_highlight();
+                }
+            }
             self.launch_url(modifiers, point);
         }
 
