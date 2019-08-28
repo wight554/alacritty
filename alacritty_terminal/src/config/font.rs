@@ -1,10 +1,10 @@
 use std::fmt;
 
+use font::RasterizerConfig;
 use font::Size;
 use serde::de::Visitor;
 use serde::{Deserialize, Deserializer};
 
-#[cfg(target_os = "macos")]
 use crate::config::DefaultTrueBool;
 use crate::config::{failure_default, Delta};
 
@@ -48,6 +48,11 @@ pub struct Font {
     #[cfg(target_os = "macos")]
     #[serde(deserialize_with = "failure_default")]
     use_thin_strokes: DefaultTrueBool,
+
+    /// Toggles rendering of font ligatures
+    #[cfg(not(any(target_os = "macos", windows)))]
+    #[serde(deserialize_with = "failure_default")]
+    use_font_ligatures: DefaultTrueBool,
 }
 
 impl Default for Font {
@@ -60,6 +65,8 @@ impl Default for Font {
             bold_italic: Default::default(),
             glyph_offset: Default::default(),
             offset: Default::default(),
+            #[cfg(not(any(target_os = "macos", windows)))]
+            use_font_ligatures: Default::default(),
             #[cfg(target_os = "macos")]
             use_thin_strokes: Default::default(),
         }
@@ -100,6 +107,25 @@ impl Font {
     #[cfg(not(target_os = "macos"))]
     pub fn use_thin_strokes(&self) -> bool {
         false
+    }
+
+    #[cfg(not(any(target_os = "macos", windows)))]
+    pub fn use_font_ligatures(&self) -> bool {
+        self.use_font_ligatures.0
+    }
+
+    #[cfg(any(target_os = "macos", windows))]
+    pub fn use_font_ligatures(&self) -> bool {
+        false
+    }
+}
+
+impl<'a> Into<RasterizerConfig> for &'a Font {
+    fn into(self) -> RasterizerConfig {
+        RasterizerConfig {
+            use_thin_strokes: self.use_thin_strokes(),
+            use_font_ligatures: self.use_font_ligatures(),
+        }
     }
 }
 

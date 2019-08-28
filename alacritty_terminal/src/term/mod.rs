@@ -42,6 +42,7 @@ use crate::url::Url;
 
 pub mod cell;
 pub mod color;
+pub mod text_run;
 
 /// Used to match equal brackets, when performing a bracket-pair selection.
 const BRACKET_PAIRS: [(char, char); 4] = [('(', ')'), ('[', ']'), ('{', '}'), ('<', '>')];
@@ -299,6 +300,13 @@ impl RenderableCell {
             bg: bg_rgb,
             bg_alpha: Self::compute_bg_alpha(colors, bg_rgb),
             flags: cell.flags,
+        }
+    }
+
+    fn is_cursor(&self) -> bool {
+        match &self.inner {
+            RenderableCellContent::Cursor(_) => true,
+            _ => false,
         }
     }
 

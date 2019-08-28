@@ -30,8 +30,8 @@ use alacritty_terminal::message_bar::Message;
 use alacritty_terminal::meter::Meter;
 use alacritty_terminal::renderer::rects::{RenderLines, RenderRect};
 use alacritty_terminal::renderer::{self, GlyphCache, QuadRenderer};
-use alacritty_terminal::term::color::Rgb;
-use alacritty_terminal::term::{RenderableCell, SizeInfo};
+use alacritty_terminal::term::{cell::Flags, color::Rgb, RenderableCell, SizeInfo};
+use alacritty_terminal::term::text_run::TextRunIter;
 
 use crate::window::{self, Window};
 
@@ -144,16 +144,15 @@ impl<T: ContextCurrentState> Display<T> {
         renderer: &mut QuadRenderer,
         config: &Config,
     ) -> Result<(GlyphCache, f32, f32), Error> {
-        let font = config.font.clone();
-        let rasterizer = font::Rasterizer::new(dpr as f32, config.font.use_thin_strokes())?;
+        let rasterizer = font::Rasterizer::new(dpr as f32, (&config.font).into())?;
 
         // Initialize glyph cache
         let glyph_cache = {
             info!("Initializing glyph cache...");
             let init_start = ::std::time::Instant::now();
 
-            let cache =
-                renderer.with_loader(|mut api| GlyphCache::new(rasterizer, &font, &mut api))?;
+            let cache = renderer
+                .with_loader(|mut api| GlyphCache::new(rasterizer, &config.font, &mut api))?;
 
             let stop = init_start.elapsed();
             let stop_f = stop.as_secs() as f64 + f64::from(stop.subsec_nanos()) / 1_000_000_000f64;
@@ -307,20 +306,22 @@ impl Display<PossiblyCurrent> {
             let mut lines = RenderLines::new();
 
             // Draw grid
-            {
-                let _sampler = self.meter.sampler();
+            self.renderer.with_api(&size_info, bg_opacity, font_offset, |mut api| {
+                // Iterate over each contiguous block of text
+                for text_run in TextRunIter::new(
+                    grid_cells
+                        .into_iter()
+                        // Logic for WIDE_CHAR is handled internally by TextRun
+                        // So we no longer need WIDE_CHAR_SPACER at this point.
+                        .filter(|rc| !rc.flags.contains(Flags::WIDE_CHAR_SPACER)),
+                ) {
+                    // Update underline/strikeout
+                    lines.update(&text_run);
 
-                self.renderer.with_api(&size_info, bg_opacity, font_offset, |mut api| {
-                    // Iterate over all non-empty cells in the grid
-                    for cell in grid_cells {
-                        // Update underline/strikeout
-                        lines.update(cell);
-
-                        // Draw the cell
-                        api.render_cell(cell, glyph_cache);
-                    }
-                });
-            }
+                    // Draw text run
+                    api.render_text_run(text_run, glyph_cache);
+                }
+            });
 
             let mut rects = lines.into_rects(&metrics, &size_info);
 
