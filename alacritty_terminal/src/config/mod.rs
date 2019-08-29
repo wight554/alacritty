@@ -24,7 +24,6 @@ mod bindings;
 mod colors;
 mod debug;
 mod font;
-mod monitor;
 mod mouse;
 mod scrolling;
 #[cfg(test)]
@@ -33,17 +32,16 @@ mod visual_bell;
 mod window;
 
 use crate::ansi::{Color, CursorStyle, NamedColor};
-use crate::input::{Binding, KeyBinding, MouseBinding};
 
 pub use crate::config::bindings::Key;
+pub use crate::config::bindings::{Action, Binding, KeyBinding, MouseBinding, RelaxedEq};
 pub use crate::config::colors::Colors;
 pub use crate::config::debug::Debug;
 pub use crate::config::font::{Font, FontDescription};
-pub use crate::config::monitor::Monitor;
 pub use crate::config::mouse::{ClickHandler, Mouse};
 pub use crate::config::scrolling::Scrolling;
 pub use crate::config::visual_bell::{VisualBellAnimation, VisualBellConfig};
-pub use crate::config::window::{Decorations, Dimensions, StartupMode, WindowConfig};
+pub use crate::config::window::{Decorations, Dimensions, StartupMode, WindowConfig, DEFAULT_NAME};
 use crate::term::color::Rgb;
 
 pub static DEFAULT_ALACRITTY_CONFIG: &str =
@@ -323,7 +321,7 @@ impl Cursor {
     }
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct Shell<'a> {
     pub program: Cow<'a, str>,
 
@@ -396,7 +394,7 @@ impl<'a> Deserialize<'a> for Alpha {
     }
 }
 
-#[derive(Deserialize, Debug, PartialEq, Eq)]
+#[derive(Deserialize, Copy, Clone, Debug, PartialEq, Eq)]
 struct Tabspaces(usize);
 
 impl Default for Tabspaces {
