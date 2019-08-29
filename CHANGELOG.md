@@ -47,6 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Skipping redraws on PTY update
 - Not redrawing while resizing on Windows/macOS
 - Decorations `none` launching an invisible window
+- Remove URL styles when selecting text
 
 ## 0.3.3
 
