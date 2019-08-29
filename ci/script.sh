@@ -14,4 +14,3 @@ fi
 
 # Build separately so we generate an 'alacritty' binary without -HASH appended
 cargo build --release
-cargo test --release
