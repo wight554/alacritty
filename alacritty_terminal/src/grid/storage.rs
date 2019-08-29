@@ -1,18 +1,6 @@
-/// Wrapper around Vec which supports fast indexing and rotation
-///
-/// The rotation implemented by grid::Storage is a simple integer addition.
-/// Compare with standard library rotation which requires rearranging items in
-/// memory.
-///
-/// As a consequence, the indexing operators need to be reimplemented for this
-/// type to account for the 0th element not always being at the start of the
-/// allocation.
-///
-/// Because certain Vec operations are no longer valid on this type, no Deref
-/// implementation is provided. Anything from Vec that should be exposed must be
-/// done so manually.
 use std::ops::{Index, IndexMut};
 use std::vec::Drain;
+use std::fmt;
 
 use static_assertions::assert_eq_size;
 
@@ -22,10 +10,35 @@ use crate::index::Line;
 /// Maximum number of invisible lines before buffer is resized
 const TRUNCATE_STEP: usize = 100;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+/// An optimized ring buffer for fast indexing and rotation
+///
+/// The [`Storage::rotate`] and [`Storage::rotate_up`] functions are fast
+/// modular additions on the internal `zero` field. As compared with
+/// [`slice::rotate_left`] which must rearrange items in memory.
+///
+/// As a consequence, both [`Index`] and [`IndexMut`] are reimplemented for this
+/// type to account for the zeroth element not always being at the start of the
+/// allocation.
+///
+/// Because certain [`Vec`] operations are no longer valid on this type, no
+/// [`Deref`](std::ops::Deref) implementation is provided. Anything from `Vec`
+/// that should be exposed must be done so manually.
+#[derive(Clone, Deserialize, Serialize)]
 pub struct Storage<T> {
     inner: Vec<Row<T>>,
+
+    /// Starting point for the storage of rows
+    ///
+    /// This value represents the starting line offset within the ring buffer. Doing things this
+    /// way allows for scrolling stored lines in a performant way.
+    ///
+    /// The value of this offset may be larger than the `len` itself, and will wrap around to the
+    /// start to form the ring buffer.
     zero: usize,
+
+    /// An **index** separating the visible and scrollback regions
+    ///
+    /// TODO: Why is this needed in storage, and not just in grid.
     visible_lines: Line,
 
     /// Total number of lines currently active in the terminal (scrollback + visible)
@@ -36,6 +49,21 @@ pub struct Storage<T> {
     /// without any additional insertions.
     #[serde(default)]
     len: usize,
+}
+
+impl<T> fmt::Debug for Storage<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Storage {{ \
+                zero: {}, \
+                visible_lines: {}, \
+                len: {}, \
+                inner.len: {}, \
+            }}",
+            self.zero,
+            self.visible_lines,
+            self.len,
+            self.inner.len())
+    }
 }
 
 impl<T: PartialEq> ::std::cmp::PartialEq for Storage<T> {
@@ -312,6 +340,74 @@ mod test {
     use crate::grid::storage::Storage;
     use crate::grid::GridCell;
     use crate::index::{Column, Line};
+
+    #[test]
+    fn with_capacity() {
+        let storage = Storage::with_capacity(Line(3),
+                                             Row::new(Column(0), &' '));
+
+        assert_eq!(storage.inner.len(), 3);
+        assert_eq!(storage.len, 3);
+        assert_eq!(storage.zero, 0);
+        assert_eq!(storage.visible_lines, Line(2));
+    }
+
+    #[test]
+    fn indexing() {
+        let mut storage = Storage::with_capacity(Line(3),
+                                                 Row::new(Column(0), &' '));
+
+        storage[0] = Row::new(Column(1), &'0');
+        storage[1] = Row::new(Column(1), &'1');
+        storage[2] = Row::new(Column(1), &'2');
+
+        assert_eq!(storage[0], Row::new(Column(1), &'0'));
+        assert_eq!(storage[1], Row::new(Column(1), &'1'));
+        assert_eq!(storage[2], Row::new(Column(1), &'2'));
+
+        storage.zero += 1;
+
+        assert_eq!(storage[0], Row::new(Column(1), &'1'));
+        assert_eq!(storage[1], Row::new(Column(1), &'2'));
+        assert_eq!(storage[2], Row::new(Column(1), &'0'));
+    }
+
+    #[test]
+    #[should_panic]
+    fn indexing_above_len() {
+        let mut storage = Storage::with_capacity(Line(3),
+                                                 Row::new(Column(0), &' '));
+        storage.shrink_lines(2);
+        &storage[1];
+    }
+
+    #[test]
+    #[should_panic]
+    fn indexing_above_inner_len() {
+        let storage = Storage::with_capacity(Line(0),
+                                             Row::new(Column(0), &' '));
+        &storage[1];
+    }
+
+    #[test]
+    fn rotate() {
+        let mut storage = Storage::with_capacity(Line(3),
+                                                 Row::new(Column(0), &' '));
+        storage.rotate(2);
+        assert_eq!(storage.zero, 2);
+        storage.shrink_lines(2);
+        assert_eq!(storage.len, 1);
+        assert_eq!(storage.inner.len(), 3);
+        assert_eq!(storage.zero, 2);
+    }
+
+    #[test]
+    #[should_panic]
+    fn rotate_overflow() {
+        let mut storage = Storage::with_capacity(Line(3),
+                                                 Row::new(Column(0), &' '));
+        storage.rotate(4);
+    }
 
     impl GridCell for char {
         fn is_empty(&self) -> bool {

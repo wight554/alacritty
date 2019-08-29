@@ -16,6 +16,7 @@
 
 use std::cmp::{max, min, Ordering};
 use std::ops::{Deref, Index, IndexMut, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo};
+use std::fmt;
 
 use crate::index::{self, Column, IndexRange, Line, Point};
 use crate::selection::Selection;
@@ -26,7 +27,7 @@ pub use self::row::Row;
 #[cfg(test)]
 mod tests;
 
-mod storage;
+pub mod storage;
 use self::storage::Storage;
 
 const MIN_INIT_SIZE: usize = 1_000;
@@ -72,7 +73,38 @@ pub trait GridCell {
 }
 
 /// Represents the terminal display contents
-#[derive(Clone, Debug, Deserialize, Serialize)]
+///
+/// +--------------------------------------------+ <--- ???
+/// |                                            |
+/// |                                            |
+/// |                                            |
+/// |                                            |
+/// |                                            |
+/// |              SCROLLBACK REGION             |
+/// |                                            |
+/// |                                            |
+/// |                                            |
+/// |                                            |
+/// |                                            |
+/// +--------------------------------------------+ <--- ???
+/// |                                            |
+/// |              ABOVE SCROLLING               |
+/// |                   REGION                   |
+/// |                                            |
+/// +--------------------------------------------+ <--- ???
+/// |                                            |
+/// |              SCROLLING REGION              |
+/// |                                            |
+/// +--------------------------------------------+ <--- display_offset
+/// |                                            |
+/// |              BELOW SCROLLING               |
+/// |                   REGION                   |
+/// |                                            |
+/// +--------------------------------------------+ <--- raw.zero
+///                                              |
+///                                              v
+///                                             cols
+#[derive(Clone, Deserialize, Serialize)]
 pub struct Grid<T> {
     /// Lines in the grid. Each row holds a list of cells corresponding to the
     /// columns in that row.
@@ -83,6 +115,7 @@ pub struct Grid<T> {
 
     /// Number of lines.
     ///
+    /// TODO: this invariant is incorrect.
     /// Invariant: lines is equivalent to raw.len()
     lines: index::Line,
 
@@ -108,6 +141,23 @@ pub struct Grid<T> {
     /// Range for URL hover highlights
     #[serde(default)]
     pub url_highlight: Option<RangeInclusive<index::Linear>>,
+}
+
+impl<T> fmt::Debug for Grid<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Grid {{ \
+                lines: {}, \
+                cols: {}, \
+                display_offset: {}, \
+                scroll_limit: {}, \
+                max_scroll_limit: {}, \
+            }}",
+            self.lines,
+            self.cols,
+            self.display_offset,
+            self.scroll_limit,
+            self.max_scroll_limit)
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -479,10 +529,10 @@ impl<T: GridCell + Copy + Clone> Grid<T> {
             }
             self.url_highlight = None;
 
-            // // This next loop swaps "fixed" lines outside of a scroll region
-            // // back into place after the rotation. The work is done in buffer-
-            // // space rather than terminal-space to avoid redundant
-            // // transformations.
+            // This next loop swaps "fixed" lines outside of a scroll region
+            // back into place after the rotation. The work is done in buffer-
+            // space rather than terminal-space to avoid redundant
+            // transformations.
             let fixed_lines = *self.num_lines() - *region.end;
 
             for i in 0..fixed_lines {
@@ -508,11 +558,33 @@ impl<T: GridCell + Copy + Clone> Grid<T> {
         }
     }
 
+    pub fn clear_viewport(&mut self, template: &T) {
+        // TODO: More efficiently using occ.
+        let mut iter = self.iter_from(Point { line: 0, col: Column(0) });
+        let mut bottom_nonempty_line = 0;
+        while let Some(cell) = iter.next_back() {
+            if !cell.is_empty() {
+                bottom_nonempty_line = iter.cur.line;
+                break;
+            }
+
+            // In case the whole terminal is empty somehow.
+            // TODO: Test.
+            if iter.cur.line >= *self.lines {
+                break;
+            }
+        }
+
+        let positions = self.lines - bottom_nonempty_line;
+        let region = Line(0)..self.num_lines();
+
+        self.scroll_up(&region, positions, template);
+        self.selection = None;
+        self.url_highlight = None;
+    }
+
     // Completely reset the grid state
     pub fn reset(&mut self, template: &T) {
-        // Explicitly purge all lines from history
-        let shrinkage = self.raw.len() - self.lines.0;
-        self.raw.shrink_lines(shrinkage);
         self.clear_history();
 
         // Reset all visible lines
@@ -543,6 +615,9 @@ impl<T> Grid<T> {
     }
 
     pub fn clear_history(&mut self) {
+        // Explicitly purge all lines from history
+        let shrinkage = self.raw.len() - self.lines.0;
+        self.raw.shrink_lines(shrinkage);
         self.scroll_limit = 0;
     }
 
@@ -623,6 +698,23 @@ impl<'a, T> Iterator for GridIterator<'a, T> {
             },
             _ => {
                 self.cur.col += Column(1);
+                Some(&self.grid[self.cur.line][self.cur.col])
+            },
+        }
+    }
+}
+
+impl<'a, T> DoubleEndedIterator for GridIterator<'a, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        match self.cur {
+            Point { line, col: Column(0) } if line == self.grid.len() - 1 => None,
+            Point { col, .. } if (col == Column(0)) => {
+                self.cur.line += 1;
+                self.cur.col = self.grid.num_cols() - Column(1);
+                Some(&self.grid[self.cur.line][self.cur.col])
+            },
+            _ => {
+                self.cur.col -= Column(1);
                 Some(&self.grid[self.cur.line][self.cur.col])
             },
         }
