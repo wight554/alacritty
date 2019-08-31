@@ -24,7 +24,7 @@ mio-extras = "2"
 log = "0.4"
 fnv = "1"
 unicode-width = "0.1"
-glutin = "0.22.0-alpha"
+glutin = { git = "https://github.com/chrisduerr/glutin" }
 base64 = "0.10.0"
 static_assertions = "0.3.0"
 terminfo = "0.6.1"

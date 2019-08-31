@@ -16,7 +16,7 @@ time = "0.1.40"
 env_logger = "0.6.0"
 serde_yaml = "0.8"
 serde_json = "1"
-glutin = "0.22.0-alpha"
+glutin = { git = "https://github.com/chrisduerr/glutin" }
 notify = "4"
 libc = "0.2"
 unicode-width = "0.1"
