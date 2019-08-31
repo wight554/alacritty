@@ -652,7 +652,7 @@ impl<N: Notify> Processor<N> {
 
         // Resize renderer
         let font = resize_pending.font_size.map(|fs| self.config.font.clone().with_size(fs));
-        let _ = self.render_tx.send(RenderEvent::Resize((self.size_info, font)));
+        let _ = self.render_tx.send(RenderEvent::Resize(Box::new((self.size_info, font))));
     }
 
     // Write the ref test results to the disk

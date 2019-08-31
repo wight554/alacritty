@@ -250,7 +250,7 @@ fn run(window_event_loop: GlutinEventLoop<Event>, config: Config) -> Result<(), 
                     // Request redraw
                     let _ = event_proxy.send_event(Event::RedrawRequest);
                 },
-                Ok(RenderEvent::Resize(resize)) => display.resize(resize),
+                Ok(RenderEvent::Resize(resize)) => display.resize(*resize),
                 Ok(RenderEvent::Exit) | Err(_) => break,
             };
         }

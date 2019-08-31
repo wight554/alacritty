@@ -106,7 +106,7 @@ impl From<glutin::ContextError> for Error {
 }
 
 pub enum RenderEvent {
-    Resize((SizeInfo, Option<Font>)),
+    Resize(Box<(SizeInfo, Option<Font>)>),
     Draw(Box<FrameData>),
     Exit,
 }
