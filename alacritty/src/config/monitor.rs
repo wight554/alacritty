@@ -2,18 +2,19 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use glutin::event_loop::EventLoopProxy;
 use notify::{watcher, DebouncedEvent, RecursiveMode, Watcher};
 
-use alacritty_terminal::event::Event;
+use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::util;
+
+use crate::event::EventProxy;
 
 pub struct Monitor {
     _thread: ::std::thread::JoinHandle<()>,
 }
 
 impl Monitor {
-    pub fn new<P>(path: P, event_proxy: EventLoopProxy<Event>) -> Monitor
+    pub fn new<P>(path: P, event_proxy: EventProxy) -> Monitor
     where
         P: Into<PathBuf>,
     {
@@ -46,7 +47,7 @@ impl Monitor {
                                 continue;
                             }
 
-                            let _ = event_proxy.send_event(Event::ConfigReload(path));
+                            event_proxy.send_event(Event::ConfigReload(path));
                         },
                         _ => {},
                     }

@@ -17,11 +17,6 @@
 #![cfg_attr(feature = "nightly", feature(core_intrinsics))]
 #![cfg_attr(all(test, feature = "bench"), feature(test))]
 
-#[macro_use]
-extern crate log;
-#[macro_use]
-extern crate serde_derive;
-
 #[cfg(target_os = "macos")]
 #[macro_use]
 extern crate objc;

@@ -1,5 +1,4 @@
-#[macro_use]
-extern crate serde_derive;
+use serde::Deserialize;
 use serde_json as json;
 
 use std::fs::File;
@@ -8,7 +7,7 @@ use std::path::Path;
 
 use alacritty_terminal::ansi;
 use alacritty_terminal::clipboard::Clipboard;
-use alacritty_terminal::config::Config;
+use alacritty_terminal::config::MockConfig;
 use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::index::Column;
 use alacritty_terminal::term::cell::Cell;
@@ -96,7 +95,7 @@ fn ref_test(dir: &Path) {
     let grid: Grid<Cell> = json::from_str(&serialized_grid).unwrap();
     let ref_config: RefConfig = json::from_str(&serialized_cfg).unwrap_or_default();
 
-    let mut config: Config = Default::default();
+    let mut config = MockConfig::default();
     config.scrolling.set_history(ref_config.history_size);
 
     let mut terminal = Term::new(&config, size, Clipboard::new_nop(), Mock);

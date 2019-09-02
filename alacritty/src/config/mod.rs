@@ -11,13 +11,23 @@ use serde_yaml;
 #[cfg(not(windows))]
 use xdg;
 
-use alacritty_terminal::config::{Config, DEFAULT_ALACRITTY_CONFIG};
+use alacritty_terminal::config::{Config as TermConfig, DEFAULT_ALACRITTY_CONFIG};
 
+mod bindings;
 pub mod monitor;
+mod mouse;
+#[cfg(test)]
+mod test;
+mod ui_config;
 
-use crate::config;
+pub use crate::config::bindings::{Action, Binding, Key, RelaxedEq};
+#[cfg(test)]
+pub use crate::config::mouse::{ClickHandler, Mouse};
+use crate::config::ui_config::UIConfig;
 
 pub const SOURCE_FILE_PATH: &str = file!();
+
+pub type Config = TermConfig<UIConfig>;
 
 /// Result from config loading
 pub type Result<T> = ::std::result::Result<T, Error>;
@@ -164,7 +174,7 @@ pub fn write_defaults() -> io::Result<Cow<'static, Path>> {
 }
 
 pub fn load_from(path: PathBuf) -> Config {
-    let mut config = config::reload_from(&path).unwrap_or_else(|_| Config::default());
+    let mut config = reload_from(&path).unwrap_or_else(|_| Config::default());
     config.config_path = Some(path);
     config
 }

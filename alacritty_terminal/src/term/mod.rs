@@ -18,8 +18,9 @@ use std::ops::{Index, IndexMut, Range, RangeInclusive};
 use std::time::{Duration, Instant};
 use std::{io, mem, ptr};
 
-use glutin::window::CursorIcon;
+use log::{debug, trace};
 use rfind_url::{Parser, ParserState};
+use serde::{Deserialize, Serialize};
 use unicode_width::UnicodeWidthChar;
 
 use crate::ansi::{
@@ -167,30 +168,30 @@ impl<T> selection::Dimensions for Term<T> {
 ///
 /// This manages the cursor during a render. The cursor location is inverted to
 /// draw it, and reverted after drawing to maintain state.
-pub struct RenderableCellsIter<'a> {
+pub struct RenderableCellsIter<'a, C> {
     inner: DisplayIter<'a, Cell>,
     grid: &'a Grid<Cell>,
     cursor: &'a Point,
     cursor_offset: usize,
     cursor_key: Option<CursorKey>,
     cursor_style: CursorStyle,
-    config: &'a Config,
+    config: &'a Config<C>,
     colors: &'a color::List,
     selection: Option<SelectionRange>,
     url_highlight: &'a Option<RangeInclusive<index::Linear>>,
 }
 
-impl<'a> RenderableCellsIter<'a> {
+impl<'a, C> RenderableCellsIter<'a, C> {
     /// Create the renderable cells iterator
     ///
     /// The cursor and terminal mode are required for properly displaying the
     /// cursor.
     fn new<'b, T>(
         term: &'b Term<T>,
-        config: &'b Config,
+        config: &'b Config<C>,
         selection: Option<Span>,
         mut cursor_style: CursorStyle,
-    ) -> RenderableCellsIter<'b> {
+    ) -> RenderableCellsIter<'b, C> {
         let grid = &term.grid;
 
         let cursor_offset = grid.line_to_offset(term.cursor.point.line);
@@ -266,7 +267,12 @@ pub struct RenderableCell {
 }
 
 impl RenderableCell {
-    fn new(config: &Config, colors: &color::List, cell: Indexed<Cell>, selected: bool) -> Self {
+    fn new<C>(
+        config: &Config<C>,
+        colors: &color::List,
+        cell: Indexed<Cell>,
+        selected: bool,
+    ) -> Self {
         // Lookup RGB values
         let mut fg_rgb = Self::compute_fg_rgb(config, colors, cell.fg, cell.flags);
         let mut bg_rgb = Self::compute_bg_rgb(colors, cell.bg);
@@ -302,7 +308,12 @@ impl RenderableCell {
         }
     }
 
-    fn compute_fg_rgb(config: &Config, colors: &color::List, fg: Color, flags: cell::Flags) -> Rgb {
+    fn compute_fg_rgb<C>(
+        config: &Config<C>,
+        colors: &color::List,
+        fg: Color,
+        flags: cell::Flags,
+    ) -> Rgb {
         match fg {
             Color::Spec(rgb) => rgb,
             Color::Named(ansi) => {
@@ -358,7 +369,7 @@ impl RenderableCell {
     }
 }
 
-impl<'a> Iterator for RenderableCellsIter<'a> {
+impl<'a, C> Iterator for RenderableCellsIter<'a, C> {
     type Item = RenderableCell;
 
     /// Gets the next renderable cell
@@ -566,7 +577,7 @@ fn cubic_bezier(p0: f64, p1: f64, p2: f64, p3: f64, x: f64) -> f64 {
 }
 
 impl VisualBell {
-    pub fn new(config: &Config) -> VisualBell {
+    pub fn new<C>(config: &Config<C>) -> VisualBell {
         let visual_bell_config = &config.visual_bell;
         VisualBell {
             animation: visual_bell_config.animation,
@@ -661,7 +672,7 @@ impl VisualBell {
         }
     }
 
-    pub fn update_config(&mut self, config: &Config) {
+    pub fn update_config<C>(&mut self, config: &Config<C>) {
         let visual_bell_config = &config.visual_bell;
         self.animation = visual_bell_config.animation;
         self.duration = visual_bell_config.duration();
@@ -820,13 +831,18 @@ impl<T> Term<T> {
     where
         T: EventListener,
     {
-        self.set_mouse_cursor(CursorIcon::Text);
+        self.event_proxy.send_event(Event::MouseCursorDirty);
         self.grid.scroll_display(scroll);
         self.reset_url_highlight();
         self.dirty = true;
     }
 
-    pub fn new(config: &Config, size: SizeInfo, clipboard: Clipboard, event_proxy: T) -> Term<T> {
+    pub fn new<C>(
+        config: &Config<C>,
+        size: SizeInfo,
+        clipboard: Clipboard,
+        event_proxy: T,
+    ) -> Term<T> {
         let num_cols = size.cols();
         let num_lines = size.lines();
 
@@ -870,7 +886,7 @@ impl<T> Term<T> {
         }
     }
 
-    pub fn update_config(&mut self, config: &Config) {
+    pub fn update_config<C>(&mut self, config: &Config<C>) {
         self.semantic_escape_chars = config.selection.semantic_escape_chars().to_owned();
         self.original_colors.fill_named(&config.colors);
         self.original_colors.fill_cube(&config.colors);
@@ -1028,7 +1044,7 @@ impl<T> Term<T> {
     /// A renderable cell is any cell which has content other than the default
     /// background color.  Cells with an alternate background color are
     /// considered renderable as are cells with any text content.
-    pub fn renderable_cells<'b>(&'b self, config: &'b Config) -> RenderableCellsIter<'_> {
+    pub fn renderable_cells<'b, C>(&'b self, config: &'b Config<C>) -> RenderableCellsIter<'_, C> {
         let selection = self.grid.selection.as_ref().and_then(|s| s.to_span(self));
 
         let cursor = if self.is_focused || !config.cursor.unfocused_hollow() {
@@ -1325,12 +1341,6 @@ impl<T: EventListener> ansi::Handler for Term<T> {
 
             self.event_proxy.send_event(Event::Title(title));
         }
-    }
-
-    /// Set the mouse cursor
-    #[inline]
-    fn set_mouse_cursor(&mut self, cursor: CursorIcon) {
-        self.event_proxy.send_event(Event::CursorIcon(cursor));
     }
 
     /// A character to be displayed
@@ -1962,15 +1972,15 @@ impl<T: EventListener> ansi::Handler for Term<T> {
             ansi::Mode::CursorKeys => self.mode.insert(TermMode::APP_CURSOR),
             ansi::Mode::ReportMouseClicks => {
                 self.mode.insert(TermMode::MOUSE_REPORT_CLICK);
-                self.set_mouse_cursor(CursorIcon::Default);
+                self.event_proxy.send_event(Event::MouseCursorDirty);
             },
             ansi::Mode::ReportCellMouseMotion => {
                 self.mode.insert(TermMode::MOUSE_DRAG);
-                self.set_mouse_cursor(CursorIcon::Default);
+                self.event_proxy.send_event(Event::MouseCursorDirty);
             },
             ansi::Mode::ReportAllMouseMotion => {
                 self.mode.insert(TermMode::MOUSE_MOTION);
-                self.set_mouse_cursor(CursorIcon::Default);
+                self.event_proxy.send_event(Event::MouseCursorDirty);
             },
             ansi::Mode::ReportFocusInOut => self.mode.insert(TermMode::FOCUS_IN_OUT),
             ansi::Mode::BracketedPaste => self.mode.insert(TermMode::BRACKETED_PASTE),
@@ -2002,15 +2012,15 @@ impl<T: EventListener> ansi::Handler for Term<T> {
             ansi::Mode::CursorKeys => self.mode.remove(TermMode::APP_CURSOR),
             ansi::Mode::ReportMouseClicks => {
                 self.mode.remove(TermMode::MOUSE_REPORT_CLICK);
-                self.set_mouse_cursor(CursorIcon::Text);
+                self.event_proxy.send_event(Event::MouseCursorDirty);
             },
             ansi::Mode::ReportCellMouseMotion => {
                 self.mode.remove(TermMode::MOUSE_DRAG);
-                self.set_mouse_cursor(CursorIcon::Text);
+                self.event_proxy.send_event(Event::MouseCursorDirty);
             },
             ansi::Mode::ReportAllMouseMotion => {
                 self.mode.remove(TermMode::MOUSE_MOTION);
-                self.set_mouse_cursor(CursorIcon::Text);
+                self.event_proxy.send_event(Event::MouseCursorDirty);
             },
             ansi::Mode::ReportFocusInOut => self.mode.remove(TermMode::FOCUS_IN_OUT),
             ansi::Mode::BracketedPaste => self.mode.remove(TermMode::BRACKETED_PASTE),
@@ -2107,7 +2117,7 @@ mod tests {
 
     use crate::ansi::{self, CharsetIndex, Handler, StandardCharset};
     use crate::clipboard::Clipboard;
-    use crate::config::Config;
+    use crate::config::MockConfig;
     use crate::event::{Event, EventListener};
     use crate::grid::{Grid, Scroll};
     use crate::index::{Column, Line, Point, Side};
@@ -2130,7 +2140,7 @@ mod tests {
             padding_y: 0.0,
             dpr: 1.0,
         };
-        let mut term = Term::new(&Default::default(), size, Clipboard::new_nop(), Mock);
+        let mut term = Term::new(&MockConfig::default(), size, Clipboard::new_nop(), Mock);
         let mut grid: Grid<Cell> = Grid::new(Line(3), Column(5), 0, Cell::default());
         for i in 0..5 {
             for j in 0..2 {
@@ -2174,7 +2184,7 @@ mod tests {
             padding_y: 0.0,
             dpr: 1.0,
         };
-        let mut term = Term::new(&Default::default(), size, Clipboard::new_nop(), Mock);
+        let mut term = Term::new(&MockConfig::default(), size, Clipboard::new_nop(), Mock);
         let mut grid: Grid<Cell> = Grid::new(Line(1), Column(5), 0, Cell::default());
         for i in 0..5 {
             grid[Line(0)][Column(i)].c = 'a';
@@ -2199,7 +2209,7 @@ mod tests {
             padding_y: 0.0,
             dpr: 1.0,
         };
-        let mut term = Term::new(&Default::default(), size, Clipboard::new_nop(), Mock);
+        let mut term = Term::new(&MockConfig::default(), size, Clipboard::new_nop(), Mock);
         let mut grid: Grid<Cell> = Grid::new(Line(3), Column(3), 0, Cell::default());
         for l in 0..3 {
             if l != 1 {
@@ -2243,7 +2253,7 @@ mod tests {
             padding_y: 0.0,
             dpr: 1.0,
         };
-        let mut term = Term::new(&Default::default(), size, Clipboard::new_nop(), Mock);
+        let mut term = Term::new(&MockConfig::default(), size, Clipboard::new_nop(), Mock);
         let cursor = Point::new(Line(0), Column(0));
         term.configure_charset(CharsetIndex::G0, StandardCharset::SpecialCharacterAndLineDrawing);
         term.input('a');
@@ -2262,8 +2272,7 @@ mod tests {
             padding_y: 0.0,
             dpr: 1.0,
         };
-        let config: Config = Default::default();
-        let mut term = Term::new(&config, size, Clipboard::new_nop(), Mock);
+        let mut term = Term::new(&MockConfig::default(), size, Clipboard::new_nop(), Mock);
 
         // Add one line of scrollback
         term.grid.scroll_up(&(Line(0)..Line(1)), Line(1), &Cell::default());
@@ -2289,7 +2298,7 @@ mod benches {
     use std::path::Path;
 
     use crate::clipboard::Clipboard;
-    use crate::config::Config;
+    use crate::config::MockConfig;
     use crate::event::{Event, EventListener};
     use crate::grid::Grid;
 
@@ -2335,7 +2344,7 @@ mod benches {
         let mut grid: Grid<Cell> = json::from_str(&serialized_grid).unwrap();
         let size: SizeInfo = json::from_str(&serialized_size).unwrap();
 
-        let config = Config::default();
+        let config = MockConfig::default();
 
         let mut terminal = Term::new(&config, size, Clipboard::new_nop(), Mock);
         mem::swap(&mut terminal.grid, &mut grid);

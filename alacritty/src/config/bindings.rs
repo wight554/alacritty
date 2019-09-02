@@ -16,11 +16,12 @@ use std::fmt;
 use std::str::FromStr;
 
 use glutin::event::{ModifiersState, MouseButton};
+use log::error;
 use serde::de::Error as SerdeError;
 use serde::de::{self, MapAccess, Unexpected, Visitor};
 use serde::{Deserialize, Deserializer};
 
-use crate::term::TermMode;
+use alacritty_terminal::term::TermMode;
 
 /// Describes a state and action to take in that state
 ///
@@ -1171,8 +1172,9 @@ impl<'a> de::Deserialize<'a> for ModsWrapper {
 mod test {
     use glutin::event::ModifiersState;
 
+    use alacritty_terminal::term::TermMode;
+
     use crate::config::{Action, Binding};
-    use crate::term::TermMode;
 
     type MockBinding = Binding<usize>;
 

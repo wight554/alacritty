@@ -1,3 +1,5 @@
+use serde::Deserialize;
+
 use crate::config::{
     failure_default, from_string_or_deserialize, option_explicit_none, Delta, FromString,
 };

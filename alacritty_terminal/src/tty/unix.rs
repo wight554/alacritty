@@ -22,6 +22,7 @@ use crate::tty::{ChildEvent, EventedPty, EventedReadWrite};
 use mio;
 
 use libc::{self, c_int, pid_t, winsize, TIOCSCTTY};
+use log::error;
 use nix::pty::openpty;
 use signal_hook::{self as sighook, iterator::Signals};
 
@@ -133,7 +134,7 @@ pub struct Pty {
 }
 
 /// Create a new tty and return a handle to interact with it.
-pub fn new(config: &Config, size: &SizeInfo, window_id: Option<usize>) -> Pty {
+pub fn new<C>(config: &Config<C>, size: &SizeInfo, window_id: Option<usize>) -> Pty {
     let win_size = size.to_winsize();
     let mut buf = [0; 1024];
     let pw = get_pw_entry(&mut buf);

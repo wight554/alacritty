@@ -17,14 +17,12 @@
 use std::f64;
 
 use glutin::dpi::{PhysicalPosition, PhysicalSize};
-use glutin::event_loop::EventLoopProxy;
 use glutin::{ContextCurrentState, NotCurrent, PossiblyCurrent, RawContext};
 use log::info;
 
 use font::{self, Rasterize};
 
-use alacritty_terminal::config::{Config, Font, StartupMode};
-use alacritty_terminal::event::Event;
+use alacritty_terminal::config::{Font, StartupMode};
 use alacritty_terminal::index::Line;
 use alacritty_terminal::message_bar::Message;
 use alacritty_terminal::meter::Meter;
@@ -33,6 +31,8 @@ use alacritty_terminal::renderer::{self, GlyphCache, QuadRenderer};
 use alacritty_terminal::term::color::Rgb;
 use alacritty_terminal::term::{RenderableCell, SizeInfo};
 
+use crate::config::Config;
+use crate::event::EventProxy;
 use crate::window::{self, Window};
 
 #[derive(Debug)]
@@ -130,7 +130,7 @@ pub struct Display<T: ContextCurrentState> {
     glyph_cache: GlyphCache,
     meter: Meter,
     size_info: SizeInfo,
-    event_proxy: EventLoopProxy<Event>,
+    event_proxy: EventProxy,
 }
 
 impl<T: ContextCurrentState> Display<T> {
@@ -176,7 +176,7 @@ impl Display<PossiblyCurrent> {
         config: &Config,
         window: &mut Window,
         context: RawContext<PossiblyCurrent>,
-        event_proxy: EventLoopProxy<Event>,
+        event_proxy: EventProxy,
     ) -> Result<Display<PossiblyCurrent>, Error> {
         let dpr = window.hidpi_factor();
         info!("Device pixel ratio: {}", dpr);

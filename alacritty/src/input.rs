@@ -32,7 +32,6 @@ use log::{debug, trace, warn};
 
 use alacritty_terminal::ansi::{ClearMode, Handler};
 use alacritty_terminal::clipboard::ClipboardType;
-use alacritty_terminal::config::{Action, Binding, Config, Key, RelaxedEq};
 use alacritty_terminal::event::EventListener;
 use alacritty_terminal::grid::Scroll;
 use alacritty_terminal::index::{Column, Line, Point, Side};
@@ -42,6 +41,7 @@ use alacritty_terminal::term::{SizeInfo, Term};
 use alacritty_terminal::url::Url;
 use alacritty_terminal::util::start_daemon;
 
+use crate::config::{Action, Binding, Config, Key, RelaxedEq};
 use crate::event::{ClickState, Mouse, FONT_SIZE_STEP};
 use crate::window::Window;
 
@@ -214,6 +214,16 @@ pub enum MouseState {
     Text,
 }
 
+impl From<MouseState> for CursorIcon {
+    fn from(mouse_state: MouseState) -> CursorIcon {
+        match mouse_state {
+            MouseState::Url(_) | MouseState::MessageBarButton => CursorIcon::Hand,
+            MouseState::Text => CursorIcon::Text,
+            _ => CursorIcon::Default,
+        }
+    }
+}
+
 impl<'a, T: EventListener, A: ActionContext<T> + 'a> Processor<'a, T, A> {
     pub fn new(ctx: A, config: &'a mut Config) -> Self {
         Self { ctx, config, _phantom: Default::default() }
@@ -233,9 +243,9 @@ impl<'a, T: EventListener, A: ActionContext<T> + 'a> Processor<'a, T, A> {
         }
 
         // Check for URL at point with required modifiers held
-        if self.config.mouse.url.mods().relaxed_eq(mods)
+        if self.config.ui_config.mouse.url.mods().relaxed_eq(mods)
             && (!self.ctx.terminal().mode().intersects(mouse_mode) || mods.shift)
-            && self.config.mouse.url.launcher.is_some()
+            && self.config.ui_config.mouse.url.launcher.is_some()
         {
             let buffer_point = self.ctx.terminal().visible_to_buffer(point);
             if let Some(url) =
@@ -411,14 +421,16 @@ impl<'a, T: EventListener, A: ActionContext<T> + 'a> Processor<'a, T, A> {
 
         self.ctx.mouse_mut().click_state = match self.ctx.mouse().click_state {
             ClickState::Click
-                if !button_changed && elapsed < self.config.mouse.double_click.threshold =>
+                if !button_changed
+                    && elapsed < self.config.ui_config.mouse.double_click.threshold =>
             {
                 self.ctx.mouse_mut().block_url_launcher = true;
                 self.on_mouse_double_click(button, point);
                 ClickState::DoubleClick
             }
             ClickState::DoubleClick
-                if !button_changed && elapsed < self.config.mouse.triple_click.threshold =>
+                if !button_changed
+                    && elapsed < self.config.ui_config.mouse.triple_click.threshold =>
             {
                 self.ctx.mouse_mut().block_url_launcher = true;
                 self.on_mouse_triple_click(button, point);
@@ -486,7 +498,7 @@ impl<'a, T: EventListener, A: ActionContext<T> + 'a> Processor<'a, T, A> {
 
     // Spawn URL launcher when clicking on URLs
     fn launch_url(&self, modifiers: ModifiersState, point: Point) -> Option<()> {
-        if !self.config.mouse.url.mods().relaxed_eq(modifiers)
+        if !self.config.ui_config.mouse.url.mods().relaxed_eq(modifiers)
             || self.ctx.mouse().block_url_launcher
         {
             return None;
@@ -496,7 +508,7 @@ impl<'a, T: EventListener, A: ActionContext<T> + 'a> Processor<'a, T, A> {
         let url = self.ctx.terminal().urls().drain(..).find(|url| url.contains(point))?;
         let text = self.ctx.terminal().url_to_string(&url);
 
-        let launcher = self.config.mouse.url.launcher.as_ref()?;
+        let launcher = self.config.ui_config.mouse.url.launcher.as_ref()?;
         let mut args = launcher.args().to_vec();
         args.push(text);
 
@@ -686,7 +698,7 @@ impl<'a, T: EventListener, A: ActionContext<T> + 'a> Processor<'a, T, A> {
     /// Returns true if an action is executed.
     fn process_key_bindings(&mut self, input: KeyboardInput) -> bool {
         let mut has_binding = false;
-        for binding in &self.config.key_bindings {
+        for binding in &self.config.ui_config.key_bindings {
             let is_triggered = match binding.trigger {
                 Key::Scancode(_) => binding.is_triggered_by(
                     *self.ctx.terminal().mode(),
@@ -727,7 +739,7 @@ impl<'a, T: EventListener, A: ActionContext<T> + 'a> Processor<'a, T, A> {
     /// Returns true if an action is executed.
     fn process_mouse_bindings(&mut self, mods: ModifiersState, button: MouseButton) -> bool {
         let mut has_binding = false;
-        for binding in &self.config.mouse_bindings {
+        for binding in &self.config.ui_config.mouse_bindings {
             if binding.is_triggered_by(*self.ctx.terminal().mode(), mods, &button, true) {
                 // binding was triggered; run the action
                 let mouse_mode = !mods.shift
@@ -795,13 +807,16 @@ impl<'a, T: EventListener, A: ActionContext<T> + 'a> Processor<'a, T, A> {
 
     #[inline]
     fn update_mouse_cursor(&mut self, mouse_state: MouseState) {
-        let mouse_cursor = match mouse_state {
-            MouseState::Url(_) | MouseState::MessageBarButton => CursorIcon::Hand,
-            MouseState::Text => CursorIcon::Text,
-            _ => CursorIcon::Default,
-        };
+        self.ctx.window_mut().set_mouse_cursor(mouse_state.into());
+    }
 
-        self.ctx.terminal_mut().set_mouse_cursor(mouse_cursor);
+    #[inline]
+    pub fn reset_mouse_cursor(&mut self) {
+        if let Some(point) = self.ctx.mouse_coords() {
+            let mods = self.ctx.modifiers().into();
+            let mouse_state = self.mouse_state(point, mods);
+            self.update_mouse_cursor(mouse_state);
+        }
     }
 }
 
@@ -815,7 +830,6 @@ mod tests {
     };
 
     use alacritty_terminal::clipboard::{Clipboard, ClipboardType};
-    use alacritty_terminal::config::{self, ClickHandler, Config};
     use alacritty_terminal::event::{Event as TerminalEvent, EventListener};
     use alacritty_terminal::grid::Scroll;
     use alacritty_terminal::index::{Point, Side};
@@ -823,6 +837,7 @@ mod tests {
     use alacritty_terminal::selection::Selection;
     use alacritty_terminal::term::{SizeInfo, Term, TermMode};
 
+    use crate::config::{ClickHandler, Config};
     use crate::event::{ClickState, Mouse};
     use crate::window::Window;
 
@@ -965,7 +980,7 @@ mod tests {
             #[test]
             fn $name() {
                 let mut cfg = Config::default();
-                cfg.mouse = config::Mouse {
+                cfg.ui_config.mouse = crate::config::Mouse {
                     double_click: ClickHandler {
                         threshold: Duration::from_millis(1000),
                     },

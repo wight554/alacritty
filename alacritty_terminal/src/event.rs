@@ -1,16 +1,13 @@
 use std::borrow::Cow;
 use std::path::PathBuf;
 
-use glutin::event_loop::EventLoopProxy;
-use glutin::window::CursorIcon;
-
 use crate::message_bar::Message;
 use crate::term::SizeInfo;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
-    CursorIcon(CursorIcon),
     ConfigReload(PathBuf),
+    MouseCursorDirty,
     Message(Message),
     Title(String),
     RedrawRequest,
@@ -35,10 +32,4 @@ pub trait OnResize {
 /// Event Loop for notifying the renderer about terminal events
 pub trait EventListener {
     fn send_event(&self, event: Event);
-}
-
-impl EventListener for EventLoopProxy<Event> {
-    fn send_event(&self, event: Event) {
-        let _ = self.send_event(event);
-    }
 }

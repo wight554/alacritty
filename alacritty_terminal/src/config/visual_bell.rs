@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use serde::Deserialize;
+
 use crate::config::failure_default;
 use crate::term::color::Rgb;
 

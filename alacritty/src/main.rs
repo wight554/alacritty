@@ -41,9 +41,8 @@ use log::{error, info};
 use winapi::um::wincon::{AttachConsole, FreeConsole, ATTACH_PARENT_PROCESS};
 
 use alacritty_terminal::clipboard::Clipboard;
-use alacritty_terminal::config::Config;
 use alacritty_terminal::die;
-use alacritty_terminal::event::Event;
+use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::event_loop::{self, EventLoop, Msg};
 #[cfg(target_os = "macos")]
 use alacritty_terminal::locale;
@@ -64,8 +63,9 @@ mod window;
 
 use crate::cli::Options;
 use crate::config::monitor::Monitor;
+use crate::config::Config;
 use crate::display::{Display, RenderEvent};
-use crate::event::Processor;
+use crate::event::{EventProxy, Processor};
 use crate::window::WindowedContext;
 
 fn main() {
@@ -144,7 +144,7 @@ fn run(window_event_loop: GlutinEventLoop<Event>, config: Config) -> Result<(), 
     tty::setup_env(&config);
 
     // Create the window
-    let event_proxy = window_event_loop.create_proxy();
+    let event_proxy = EventProxy::new(window_event_loop.create_proxy());
     let WindowedContext { mut window, context } =
         WindowedContext::new(&config, &window_event_loop)?;
 
@@ -240,7 +240,7 @@ fn run(window_event_loop: GlutinEventLoop<Event>, config: Config) -> Result<(), 
         let mut display: Display<PossiblyCurrent> = display.into();
 
         // Request redraw
-        let _ = event_proxy.send_event(Event::RedrawRequest);
+        event_proxy.send_event(Event::RedrawRequest);
 
         loop {
             match render_rx.recv() {
@@ -248,7 +248,7 @@ fn run(window_event_loop: GlutinEventLoop<Event>, config: Config) -> Result<(), 
                     display.draw(*frame_data);
 
                     // Request redraw
-                    let _ = event_proxy.send_event(Event::RedrawRequest);
+                    event_proxy.send_event(Event::RedrawRequest);
                 },
                 Ok(RenderEvent::Resize(resize)) => display.resize(*resize),
                 Ok(RenderEvent::Exit) | Err(_) => break,

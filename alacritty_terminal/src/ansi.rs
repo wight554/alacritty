@@ -17,11 +17,13 @@ use std::io;
 use std::ops::Range;
 use std::str;
 
-use crate::index::{Column, Contains, Line};
 use base64;
-use glutin::window::CursorIcon;
+use log::{debug, trace};
+use serde::{Deserialize, Serialize};
+
 use vte;
 
+use crate::index::{Column, Contains, Line};
 use crate::term::color::Rgb;
 
 // Parse colors in XParseColor format
@@ -157,9 +159,6 @@ pub trait TermInfo {
 pub trait Handler {
     /// OSC to set window title
     fn set_title(&mut self, _: &str) {}
-
-    /// Set the window's mouse cursor
-    fn set_mouse_cursor(&mut self, _: CursorIcon) {}
 
     /// Set the cursor style
     fn set_cursor_style(&mut self, _: Option<CursorStyle>) {}

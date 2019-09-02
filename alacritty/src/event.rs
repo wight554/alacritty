@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use glutin::dpi::PhysicalSize;
 use glutin::event::{ElementState, Event as GlutinEvent, MouseButton};
-use glutin::event_loop::{ControlFlow, EventLoop};
+use glutin::event_loop::{ControlFlow, EventLoop, EventLoopProxy};
 use glutin::platform::desktop::EventLoopExtDesktop;
 use log::{debug, info, warn};
 use serde_json as json;
@@ -19,7 +19,6 @@ use serde_json as json;
 use font::Size;
 
 use alacritty_terminal::clipboard::ClipboardType;
-use alacritty_terminal::config::Config;
 use alacritty_terminal::event::OnResize;
 use alacritty_terminal::event::{Event, EventListener, Notify};
 use alacritty_terminal::grid::Scroll;
@@ -34,6 +33,7 @@ use alacritty_terminal::tty;
 use alacritty_terminal::util::{limit, start_daemon};
 
 use crate::config;
+use crate::config::Config;
 use crate::display::{self, FrameData, RenderEvent};
 use crate::input::{self, ActionContext as _, Modifiers};
 use crate::window::Window;
@@ -380,7 +380,6 @@ impl<N: Notify> Processor<N> {
     {
         match event {
             GlutinEvent::UserEvent(event) => match event {
-                Event::CursorIcon(cursor) => processor.ctx.window.set_mouse_cursor(cursor),
                 Event::Title(title) => processor.ctx.window.set_title(&title),
                 Event::Wakeup => processor.ctx.terminal.dirty = true,
                 Event::Urgent => {
@@ -402,6 +401,7 @@ impl<N: Notify> Processor<N> {
                     processor.ctx.resize_pending.message_buffer = Some(());
                     processor.ctx.terminal.dirty = true;
                 },
+                Event::MouseCursorDirty => processor.reset_mouse_cursor(),
                 Event::Exit => (),
             },
             GlutinEvent::WindowEvent { event, .. } => {
@@ -417,7 +417,7 @@ impl<N: Notify> Processor<N> {
                         processor.process_key(input);
                         if input.state == ElementState::Pressed {
                             // Hide cursor while typing
-                            if processor.config.mouse.hide_when_typing {
+                            if processor.config.ui_config.mouse.hide_when_typing {
                                 processor.ctx.window.set_mouse_visible(false);
                             }
                         }
@@ -601,8 +601,8 @@ impl<N: Notify> Processor<N> {
     {
         // Update the cell metrics with the new glyph dimensions
         if let Some(size) = resize_pending.font_size {
-            if let Ok(metrics) = GlyphCache::static_metrics(&self.config, size, self.size_info.dpr)
-            {
+            let font = self.config.font.clone().with_size(size);
+            if let Ok(metrics) = GlyphCache::static_metrics(font, self.size_info.dpr) {
                 // Update cell size
                 let (cell_width, cell_height) =
                     GlyphCache::compute_cell_size(&self.config, &metrics);
@@ -683,5 +683,20 @@ impl<N: Notify> Processor<N> {
         File::create("./config.json")
             .and_then(|mut f| f.write_all(serialized_config.as_bytes()))
             .expect("write config.json");
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct EventProxy(EventLoopProxy<Event>);
+
+impl EventProxy {
+    pub fn new(proxy: EventLoopProxy<Event>) -> Self {
+        EventProxy(proxy)
+    }
+}
+
+impl EventListener for EventProxy {
+    fn send_event(&self, event: Event) {
+        let _ = self.0.send_event(event);
     }
 }

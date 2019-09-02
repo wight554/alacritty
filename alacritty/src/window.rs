@@ -33,12 +33,13 @@ use glutin::{
 };
 use log::debug;
 
-use alacritty_terminal::config::DEFAULT_NAME;
-use alacritty_terminal::config::{Config, Decorations, StartupMode, WindowConfig};
+use alacritty_terminal::config::{Decorations, StartupMode, WindowConfig, DEFAULT_NAME};
 use alacritty_terminal::event::Event;
 use alacritty_terminal::gl;
 use alacritty_terminal::renderer::GlyphCache;
 use alacritty_terminal::term::{SizeInfo, Term};
+
+use crate::config::Config;
 
 // It's required to be in this directory due to the `windows.rc` file
 #[cfg(not(target_os = "macos"))]
@@ -143,7 +144,7 @@ impl WindowedContext {
             event_loop.available_monitors().next().map(|m| m.hidpi_factor()).unwrap_or(1.);
 
         // Guess the target window dimensions
-        let metrics = GlyphCache::static_metrics(config, config.font.size, estimated_dpr)?;
+        let metrics = GlyphCache::static_metrics(config.font.clone(), estimated_dpr)?;
         let (cell_width, cell_height) = GlyphCache::compute_cell_size(config, &metrics);
         let dimensions =
             GlyphCache::calculate_dimensions(config, estimated_dpr, cell_width, cell_height);

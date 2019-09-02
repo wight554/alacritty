@@ -22,10 +22,11 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use fnv::FnvHasher;
-use font::{self, FontDesc, FontKey, GlyphKey, Rasterize, RasterizedGlyph, Rasterizer, Size};
+use font::{self, FontDesc, FontKey, GlyphKey, Rasterize, RasterizedGlyph, Rasterizer};
+use log::{error, info};
 use notify::{watcher, DebouncedEvent, RecursiveMode, Watcher};
 
-use crate::config::{self, Config, Delta, StartupMode};
+use crate::config::{self, Config, Delta, Font, StartupMode};
 use crate::cursor::{get_cursor_glyph, CursorKey};
 use crate::gl;
 use crate::gl::types::*;
@@ -348,23 +349,17 @@ impl GlyphCache {
     }
 
     // Calculate font metrics without access to a glyph cache
-    pub fn static_metrics(
-        config: &Config,
-        font_size: Size,
-        dpr: f64,
-    ) -> Result<font::Metrics, font::Error> {
-        let font = config.font.clone();
-
-        let mut rasterizer = font::Rasterizer::new(dpr as f32, config.font.use_thin_strokes())?;
+    pub fn static_metrics(font: Font, dpr: f64) -> Result<font::Metrics, font::Error> {
+        let mut rasterizer = font::Rasterizer::new(dpr as f32, font.use_thin_strokes())?;
         let regular_desc =
             GlyphCache::make_desc(&font.normal(), font::Slant::Normal, font::Weight::Normal);
-        let regular = rasterizer.load_font(&regular_desc, font_size)?;
-        rasterizer.get_glyph(GlyphKey { font_key: regular, c: 'm', size: font_size })?;
+        let regular = rasterizer.load_font(&regular_desc, font.size)?;
+        rasterizer.get_glyph(GlyphKey { font_key: regular, c: 'm', size: font.size })?;
 
-        rasterizer.metrics(regular, font_size)
+        rasterizer.metrics(regular, font.size)
     }
 
-    pub fn compute_cell_size(config: &Config, metrics: &font::Metrics) -> (f32, f32) {
+    pub fn compute_cell_size<C>(config: &Config<C>, metrics: &font::Metrics) -> (f32, f32) {
         let offset_x = f64::from(config.font.offset.x);
         let offset_y = f64::from(config.font.offset.y);
         (
@@ -373,8 +368,8 @@ impl GlyphCache {
         )
     }
 
-    pub fn calculate_dimensions(
-        config: &Config,
+    pub fn calculate_dimensions<C>(
+        config: &Config<C>,
         dpr: f64,
         cell_width: f32,
         cell_height: f32,
