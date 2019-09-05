@@ -15,6 +15,8 @@
 //! The display subsystem including window management, font rasterization, and
 //! GPU drawing.
 use std::f64;
+use std::fmt;
+use std::time::Instant;
 
 use glutin::dpi::{PhysicalPosition, PhysicalSize};
 use glutin::{ContextCurrentState, NotCurrent, PossiblyCurrent, RawContext};
@@ -50,8 +52,8 @@ pub enum Error {
     ContextError(glutin::ContextError),
 }
 
-impl ::std::error::Error for Error {
-    fn cause(&self) -> Option<&dyn (::std::error::Error)> {
+impl std::error::Error for Error {
+    fn cause(&self) -> Option<&dyn (std::error::Error)> {
         match *self {
             Error::Window(ref err) => Some(err),
             Error::Font(ref err) => Some(err),
@@ -70,8 +72,8 @@ impl ::std::error::Error for Error {
     }
 }
 
-impl ::std::fmt::Display for Error {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             Error::Window(ref err) => err.fmt(f),
             Error::Font(ref err) => err.fmt(f),
@@ -150,7 +152,7 @@ impl<T: ContextCurrentState> Display<T> {
         // Initialize glyph cache
         let glyph_cache = {
             info!("Initializing glyph cache...");
-            let init_start = ::std::time::Instant::now();
+            let init_start = Instant::now();
 
             let cache =
                 renderer.with_loader(|mut api| GlyphCache::new(rasterizer, &font, &mut api))?;
