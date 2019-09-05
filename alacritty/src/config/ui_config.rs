@@ -47,7 +47,7 @@ fn deserialize_bindings<'a, D, T>(
 ) -> Result<Vec<Binding<T>>, D::Error>
 where
     D: Deserializer<'a>,
-    T: Copy + Eq + std::hash::Hash + std::fmt::Debug,
+    T: Copy + Eq,
     Binding<T>: Deserialize<'a>,
 {
     let mut bindings: Vec<Binding<T>> = failure_default(deserializer)?;

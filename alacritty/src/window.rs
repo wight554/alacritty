@@ -201,7 +201,6 @@ impl Window {
         self.window.hidpi_factor()
     }
 
-    /// Show window
     #[inline]
     pub fn set_visible(&self, visibility: bool) {
         self.window.set_visible(visibility);
