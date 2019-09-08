@@ -2377,7 +2377,7 @@ dependencies = [
 [[package]]
 name = "winit"
 version = "0.20.0-alpha3"
-source = "git+https://github.com/chrisduerr/winit#0b0cbeafaabde17f6f86d6dda9f67e0ef7000995"
+source = "git+https://github.com/chrisduerr/winit#3273c14dead3049354511375bf5c9c83ab321816"
 dependencies = [
  "android_glue 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "bitflags 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",

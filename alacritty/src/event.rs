@@ -478,6 +478,8 @@ impl<N: Notify> Processor<N> {
                     | HoveredFile(_)
                     | Touch(_)
                     | Moved(_) => (),
+                    // TODO: Add support for proper modifier handling
+                    ModifiersChanged { .. } => (),
                 }
             },
             GlutinEvent::DeviceEvent { .. }
