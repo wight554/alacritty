@@ -19,22 +19,24 @@ use std::fmt;
 use std::time::Instant;
 
 use glutin::dpi::{PhysicalPosition, PhysicalSize};
-use glutin::{ContextCurrentState, NotCurrent, PossiblyCurrent, RawContext};
-use log::info;
+use glutin::event_loop::EventLoop;
+use log::{debug, info};
+use parking_lot::MutexGuard;
 
-use font::{self, Rasterize};
+use font::{self, Rasterize, Size};
 
-use alacritty_terminal::config::{Font, StartupMode};
+use alacritty_terminal::config::StartupMode;
+use alacritty_terminal::event::{Event, OnResize};
 use alacritty_terminal::index::Line;
-use alacritty_terminal::message_bar::Message;
+use alacritty_terminal::message_bar::MessageBuffer;
 use alacritty_terminal::meter::Meter;
 use alacritty_terminal::renderer::rects::{RenderLines, RenderRect};
 use alacritty_terminal::renderer::{self, GlyphCache, QuadRenderer};
 use alacritty_terminal::term::color::Rgb;
-use alacritty_terminal::term::{RenderableCell, SizeInfo};
+use alacritty_terminal::term::{RenderableCell, SizeInfo, Term};
 
 use crate::config::Config;
-use crate::event::EventProxy;
+use crate::event::Resize;
 use crate::window::{self, Window};
 
 #[derive(Debug)]
@@ -107,79 +109,38 @@ impl From<glutin::ContextError> for Error {
     }
 }
 
-pub enum RenderEvent {
-    Resize(Box<(SizeInfo, Option<Font>)>),
-    Draw(Box<FrameData>),
-    Exit,
-}
-
-pub struct FrameData {
-    pub grid_cells: Vec<RenderableCell>,
-    pub message_buffer: Option<Message>,
-    pub visual_bell_intensity: f64,
-    pub background_color: Rgb,
-    pub size_info: SizeInfo,
-    pub background_opacity: f32,
-    pub font_offset: (i8, i8),
-    pub visual_bell_color: Rgb,
-    pub render_timer: bool,
-}
-
 /// The display wraps a window, font rasterizer, and GPU renderer
-pub struct Display<T: ContextCurrentState> {
-    context: RawContext<T>,
+pub struct Display {
+    pub size_info: SizeInfo,
+    pub window: Window,
+
     renderer: QuadRenderer,
     glyph_cache: GlyphCache,
     meter: Meter,
-    size_info: SizeInfo,
-    event_proxy: EventProxy,
 }
 
-impl<T: ContextCurrentState> Display<T> {
-    /// Get size info about the display
-    pub fn size(&self) -> &SizeInfo {
-        &self.size_info
-    }
+impl Display {
+    pub fn new(config: &Config, event_loop: &EventLoop<Event>) -> Result<Display, Error> {
+        // Guess DPR based on first monitor
+        let estimated_dpr =
+            event_loop.available_monitors().next().map(|m| m.hidpi_factor()).unwrap_or(1.);
 
-    fn new_glyph_cache(
-        dpr: f64,
-        renderer: &mut QuadRenderer,
-        config: &Config,
-    ) -> Result<(GlyphCache, f32, f32), Error> {
-        let font = config.font.clone();
-        let rasterizer = font::Rasterizer::new(dpr as f32, config.font.use_thin_strokes())?;
+        // Guess the target window dimensions
+        let metrics = GlyphCache::static_metrics(config.font.clone(), estimated_dpr)?;
+        let (cell_width, cell_height) = compute_cell_size(config, &metrics);
+        let dimensions =
+            GlyphCache::calculate_dimensions(config, estimated_dpr, cell_width, cell_height);
 
-        // Initialize glyph cache
-        let glyph_cache = {
-            info!("Initializing glyph cache...");
-            let init_start = Instant::now();
+        debug!("Estimated DPR: {}", estimated_dpr);
+        debug!("Estimated Cell Size: {} x {}", cell_width, cell_height);
+        debug!("Estimated Dimensions: {:?}", dimensions);
 
-            let cache =
-                renderer.with_loader(|mut api| GlyphCache::new(rasterizer, &font, &mut api))?;
+        // Create the window where Alacritty will be displayed
+        let logical = dimensions.map(|d| PhysicalSize::new(d.0, d.1).to_logical(estimated_dpr));
 
-            let stop = init_start.elapsed();
-            let stop_f = stop.as_secs() as f64 + f64::from(stop.subsec_nanos()) / 1_000_000_000f64;
-            info!("... finished initializing glyph cache in {}s", stop_f);
+        // Spawn window
+        let mut window = Window::new(event_loop, &config, logical)?;
 
-            cache
-        };
-
-        // Need font metrics to resize the window properly. This suggests to me the
-        // font metrics should be computed before creating the window in the first
-        // place so that a resize is not needed.
-        let (cw, ch) = GlyphCache::compute_cell_size(config, &glyph_cache.font_metrics());
-
-        Ok((glyph_cache, cw, ch))
-    }
-}
-
-impl Display<PossiblyCurrent> {
-    pub fn new(
-        config: &Config,
-        window: &mut Window,
-        context: RawContext<PossiblyCurrent>,
-        event_proxy: EventProxy,
-    ) -> Result<Display<PossiblyCurrent>, Error> {
         let dpr = window.hidpi_factor();
         info!("Device pixel ratio: {}", dpr);
 
@@ -228,19 +189,17 @@ impl Display<PossiblyCurrent> {
         };
 
         // Update OpenGL projection
-        renderer.resize(size_info);
+        renderer.resize(&size_info);
 
         // Clear screen
         let background_color = config.colors.primary.background;
-        let background_opacity = config.background_opacity();
-        let font_offset = (config.font.offset.x, config.font.offset.y);
-        renderer.with_api(&size_info, background_opacity, font_offset, |api| {
+        renderer.with_api(&config, &size_info, |api| {
             api.clear(background_color);
         });
 
         // We should call `clear` when window is offscreen, so when `window.show()` happens it
         // would be with background color instead of uninitialized surface.
-        context.swap_buffers()?;
+        window.swap_buffers();
 
         window.set_visible(true);
 
@@ -264,21 +223,115 @@ impl Display<PossiblyCurrent> {
             _ => (),
         }
 
-        Ok(Display { context, renderer, glyph_cache, meter: Meter::new(), size_info, event_proxy })
+        Ok(Display { window, renderer, glyph_cache, meter: Meter::new(), size_info })
     }
 
-    /// Process terminal size changes
-    pub fn resize(&mut self, (size_info, font): (SizeInfo, Option<Font>)) {
-        if let Some(font) = font {
-            let cache = &mut self.glyph_cache;
-            self.renderer.with_loader(|mut api| {
-                let _ = cache.update_font_size(font, size_info.dpr, &mut api);
-            });
+    fn new_glyph_cache(
+        dpr: f64,
+        renderer: &mut QuadRenderer,
+        config: &Config,
+    ) -> Result<(GlyphCache, f32, f32), Error> {
+        let font = config.font.clone();
+        let rasterizer = font::Rasterizer::new(dpr as f32, config.font.use_thin_strokes())?;
+
+        // Initialize glyph cache
+        let glyph_cache = {
+            info!("Initializing glyph cache...");
+            let init_start = Instant::now();
+
+            let cache =
+                renderer.with_loader(|mut api| GlyphCache::new(rasterizer, &font, &mut api))?;
+
+            let stop = init_start.elapsed();
+            let stop_f = stop.as_secs() as f64 + f64::from(stop.subsec_nanos()) / 1_000_000_000f64;
+            info!("... finished initializing glyph cache in {}s", stop_f);
+
+            cache
+        };
+
+        // Need font metrics to resize the window properly. This suggests to me the
+        // font metrics should be computed before creating the window in the first
+        // place so that a resize is not needed.
+        let (cw, ch) = compute_cell_size(config, &glyph_cache.font_metrics());
+
+        Ok((glyph_cache, cw, ch))
+    }
+
+    /// Update font size and cell dimensions
+    fn update_glyph_cache(&mut self, config: &Config, size: Size) {
+        let size_info = &mut self.size_info;
+        let cache = &mut self.glyph_cache;
+
+        let font = config.font.clone().with_size(size);
+
+        self.renderer.with_loader(|mut api| {
+            let _ = cache.update_font_size(font, size_info.dpr, &mut api);
+        });
+
+        // Update cell size
+        let (cell_width, cell_height) = compute_cell_size(config, &self.glyph_cache.font_metrics());
+        size_info.cell_width = cell_width;
+        size_info.cell_height = cell_height;
+    }
+
+    /// Process resize events
+    pub fn handle_resize<T>(
+        &mut self,
+        terminal: &mut Term<T>,
+        pty_resize_handle: &mut dyn OnResize,
+        message_buffer: &MessageBuffer,
+        config: &Config,
+        resize_pending: Resize,
+    ) {
+        // Update font size and cell dimensions
+        if let Some(size) = resize_pending.font_size {
+            self.update_glyph_cache(config, size);
         }
 
-        let physical = PhysicalSize::new(f64::from(size_info.width), f64::from(size_info.height));
-        self.renderer.resize(size_info);
-        self.context.resize(physical);
+        // Update the window dimensions
+        if let Some(size) = resize_pending.dimensions {
+            self.size_info.width = size.width as f32;
+            self.size_info.height = size.height as f32;
+        }
+
+        let dpr = self.size_info.dpr;
+        let width = self.size_info.width;
+        let height = self.size_info.height;
+        let cell_width = self.size_info.cell_width;
+        let cell_height = self.size_info.cell_height;
+
+        // Recalculate padding
+        let mut padding_x = f32::from(config.window.padding.x) * dpr as f32;
+        let mut padding_y = f32::from(config.window.padding.y) * dpr as f32;
+
+        if config.window.dynamic_padding {
+            padding_x = dynamic_padding(padding_x, width, cell_width);
+            padding_y = dynamic_padding(padding_y, height, cell_height);
+        }
+
+        self.size_info.padding_x = padding_x.floor() as f32;
+        self.size_info.padding_y = padding_y.floor() as f32;
+
+        let mut pty_size = self.size_info;
+
+        // Subtract message bar lines from pty size
+        if resize_pending.message_buffer.is_some() {
+            let lines =
+                message_buffer.message().map(|m| m.text(&self.size_info).len()).unwrap_or(0);
+            pty_size.height -= pty_size.cell_height * lines as f32;
+        }
+
+        // Resize PTY
+        pty_resize_handle.on_resize(&pty_size);
+
+        // Resize terminal
+        terminal.resize(&pty_size);
+
+        // Resize renderer
+        let physical =
+            PhysicalSize::new(f64::from(self.size_info.width), f64::from(self.size_info.height));
+        self.renderer.resize(&self.size_info);
+        self.window.resize(physical);
     }
 
     /// Draw the screen
@@ -286,21 +339,26 @@ impl Display<PossiblyCurrent> {
     /// A reference to Term whose state is being drawn must be provided.
     ///
     /// This call may block if vsync is enabled
-    pub fn draw(&mut self, render_update: FrameData) {
-        let FrameData {
-            visual_bell_intensity,
-            background_color,
-            message_buffer,
-            grid_cells,
-            size_info,
-            background_opacity: bg_opacity,
-            font_offset,
-            visual_bell_color,
-            render_timer,
-        } = render_update;
+    pub fn draw<T>(
+        &mut self,
+        terminal: MutexGuard<'_, Term<T>>,
+        message_buffer: &MessageBuffer,
+        config: &Config,
+    ) {
+        let grid_cells: Vec<RenderableCell> = terminal.renderable_cells(config).collect();
+        let visual_bell_intensity = terminal.visual_bell.intensity();
+        let background_color = terminal.background_color();
         let metrics = self.glyph_cache.font_metrics();
+        let size_info = self.size_info;
 
-        self.renderer.with_api(&size_info, bg_opacity, font_offset, |api| {
+        // Update IME position
+        #[cfg(not(windows))]
+        self.window.update_ime_position(&terminal, &self.size_info);
+
+        // Drop terminal as early as possible to free lock
+        drop(terminal);
+
+        self.renderer.with_api(&config, &size_info, |api| {
             api.clear(background_color);
         });
 
@@ -312,7 +370,7 @@ impl Display<PossiblyCurrent> {
             {
                 let _sampler = self.meter.sampler();
 
-                self.renderer.with_api(&size_info, bg_opacity, font_offset, |mut api| {
+                self.renderer.with_api(&config, &size_info, |mut api| {
                     // Iterate over all non-empty cells in the grid
                     for cell in grid_cells {
                         // Update underline/strikeout
@@ -326,7 +384,7 @@ impl Display<PossiblyCurrent> {
 
             let mut rects = lines.into_rects(&metrics, &size_info);
 
-            if let Some(message) = message_buffer {
+            if let Some(message) = message_buffer.message() {
                 let text = message.text(&size_info);
 
                 // Create a new rectangle for the background
@@ -343,7 +401,7 @@ impl Display<PossiblyCurrent> {
                 // Draw rectangles including the new background
                 self.renderer.draw_rects(
                     &size_info,
-                    visual_bell_color,
+                    config.visual_bell.color,
                     visual_bell_intensity,
                     rects,
                 );
@@ -351,7 +409,7 @@ impl Display<PossiblyCurrent> {
                 // Relay messages to the user
                 let mut offset = 1;
                 for message_text in text.iter().rev() {
-                    self.renderer.with_api(&size_info, bg_opacity, font_offset, |mut api| {
+                    self.renderer.with_api(&config, &size_info, |mut api| {
                         api.render_string(
                             &message_text,
                             Line(size_info.lines().saturating_sub(offset)),
@@ -365,58 +423,39 @@ impl Display<PossiblyCurrent> {
                 // Draw rectangles
                 self.renderer.draw_rects(
                     &size_info,
-                    visual_bell_color,
+                    config.visual_bell.color,
                     visual_bell_intensity,
                     rects,
                 );
             }
 
             // Draw render timer
-            if render_timer {
+            if config.render_timer() {
                 let timing = format!("{:.3} usec", self.meter.average());
                 let color = Rgb { r: 0xd5, g: 0x4e, b: 0x53 };
-                self.renderer.with_api(&size_info, bg_opacity, font_offset, |mut api| {
+                self.renderer.with_api(&config, &size_info, |mut api| {
                     api.render_string(&timing[..], size_info.lines() - 2, glyph_cache, Some(color));
                 });
             }
         }
 
-        self.context.swap_buffers().expect("swap buffers");
+        self.window.swap_buffers();
     }
 }
 
 /// Calculate padding to spread it evenly around the terminal content
 #[inline]
-pub fn dynamic_padding(padding: f32, dimension: f32, cell_dimension: f32) -> f32 {
+fn dynamic_padding(padding: f32, dimension: f32, cell_dimension: f32) -> f32 {
     padding + ((dimension - 2. * padding) % cell_dimension) / 2.
 }
 
-impl From<Display<PossiblyCurrent>> for Display<NotCurrent> {
-    fn from(display: Display<PossiblyCurrent>) -> Self {
-        unsafe {
-            Display {
-                context: display.context.make_not_current().expect("disabling context"),
-                renderer: display.renderer,
-                glyph_cache: display.glyph_cache,
-                meter: display.meter,
-                size_info: display.size_info,
-                event_proxy: display.event_proxy,
-            }
-        }
-    }
-}
-
-impl From<Display<NotCurrent>> for Display<PossiblyCurrent> {
-    fn from(display: Display<NotCurrent>) -> Self {
-        unsafe {
-            Display {
-                context: display.context.make_current().expect("enabling context"),
-                renderer: display.renderer,
-                glyph_cache: display.glyph_cache,
-                meter: display.meter,
-                size_info: display.size_info,
-                event_proxy: display.event_proxy,
-            }
-        }
-    }
+/// Calculate the cell dimensions based on font metrics.
+#[inline]
+fn compute_cell_size(config: &Config, metrics: &font::Metrics) -> (f32, f32) {
+    let offset_x = f64::from(config.font.offset.x);
+    let offset_y = f64::from(config.font.offset.y);
+    (
+        f32::max(1., ((metrics.average_advance + offset_x) as f32).floor()),
+        f32::max(1., ((metrics.line_height + offset_y) as f32).floor()),
+    )
 }

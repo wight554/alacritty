@@ -10,7 +10,6 @@ pub enum Event {
     MouseCursorDirty,
     Message(Message),
     Title(String),
-    RedrawRequest,
     Wakeup,
     Urgent,
     Exit,

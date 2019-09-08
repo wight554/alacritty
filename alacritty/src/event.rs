@@ -6,7 +6,7 @@ use std::env;
 use std::fs;
 use std::fs::File;
 use std::io::Write;
-use std::sync::{mpsc, Arc};
+use std::sync::Arc;
 use std::time::Instant;
 
 use glutin::dpi::PhysicalSize;
@@ -24,7 +24,6 @@ use alacritty_terminal::event::{Event, EventListener, Notify};
 use alacritty_terminal::grid::Scroll;
 use alacritty_terminal::index::{Column, Line, Point, Side};
 use alacritty_terminal::message_bar::{Message, MessageBuffer};
-use alacritty_terminal::renderer::GlyphCache;
 use alacritty_terminal::selection::Selection;
 use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::cell::Cell;
@@ -34,7 +33,7 @@ use alacritty_terminal::util::{limit, start_daemon};
 
 use crate::config;
 use crate::config::Config;
-use crate::display::{self, FrameData, RenderEvent};
+use crate::display::Display;
 use crate::input::{self, ActionContext as _, Modifiers};
 use crate::window::Window;
 
@@ -43,9 +42,9 @@ pub const FONT_SIZE_STEP: f32 = 0.5;
 
 #[derive(Default, Copy, Clone, Debug, PartialEq)]
 pub struct Resize {
-    dimensions: Option<PhysicalSize>,
-    message_buffer: Option<()>,
-    font_size: Option<Size>,
+    pub dimensions: Option<PhysicalSize>,
+    pub message_buffer: Option<()>,
+    pub font_size: Option<Size>,
 }
 
 impl Resize {
@@ -298,7 +297,6 @@ impl Default for Mouse {
 pub struct Processor<N> {
     notifier: N,
     mouse: Mouse,
-    size_info: SizeInfo,
     received_count: usize,
     suppress_chars: bool,
     modifiers: Modifiers,
@@ -306,8 +304,7 @@ pub struct Processor<N> {
     config: Config,
     pty_resize_handle: Box<dyn OnResize>,
     message_buffer: MessageBuffer,
-    render_tx: mpsc::Sender<RenderEvent>,
-    window: Window,
+    display: Display,
 }
 
 impl<N: Notify> Processor<N> {
@@ -317,17 +314,14 @@ impl<N: Notify> Processor<N> {
     /// pty.
     pub fn new(
         notifier: N,
-        size_info: SizeInfo,
         pty_resize_handle: Box<dyn OnResize>,
         message_buffer: MessageBuffer,
-        render_tx: mpsc::Sender<RenderEvent>,
-        window: Window,
         config: Config,
+        display: Display,
     ) -> Processor<N> {
         Processor {
             notifier,
             mouse: Default::default(),
-            size_info,
             received_count: 0,
             suppress_chars: false,
             modifiers: Default::default(),
@@ -335,8 +329,7 @@ impl<N: Notify> Processor<N> {
             config,
             pty_resize_handle,
             message_buffer,
-            render_tx,
-            window,
+            display,
         }
     }
 
@@ -374,7 +367,6 @@ impl<N: Notify> Processor<N> {
     fn handle_event<T>(
         event: GlutinEvent<Event>,
         processor: &mut input::Processor<T, ActionContext<N, T>>,
-        redraw_requested: &mut bool,
     ) where
         T: EventListener,
     {
@@ -385,7 +377,6 @@ impl<N: Notify> Processor<N> {
                 Event::Urgent => {
                     processor.ctx.window.set_urgent(!processor.ctx.terminal.is_focused)
                 },
-                Event::RedrawRequest => *redraw_requested = true,
                 Event::ConfigReload(path) => {
                     processor.ctx.message_buffer.remove_topic(config::SOURCE_FILE_PATH);
                     processor.ctx.resize_pending.message_buffer = Some(());
@@ -499,15 +490,11 @@ impl<N: Notify> Processor<N> {
     }
 
     /// Run the event loop.
-    pub fn process_events<T>(
-        &mut self,
-        terminal: Arc<FairMutex<Term<T>>>,
-        mut event_loop: EventLoop<Event>,
-    ) where
+    pub fn run<T>(&mut self, terminal: Arc<FairMutex<Term<T>>>, mut event_loop: EventLoop<Event>)
+    where
         T: EventListener,
     {
         let mut event_queue = Vec::new();
-        let mut redraw_requested = false;
 
         event_loop.run_return(|event, _event_loop, control_flow| {
             if self.config.debug.print_events {
@@ -540,7 +527,7 @@ impl<N: Notify> Processor<N> {
                 terminal: &mut terminal,
                 notifier: &mut self.notifier,
                 mouse: &mut self.mouse,
-                size_info: &mut self.size_info,
+                size_info: &mut self.display.size_info,
                 received_count: &mut self.received_count,
                 suppress_chars: &mut self.suppress_chars,
                 modifiers: &mut self.modifiers,
@@ -548,111 +535,36 @@ impl<N: Notify> Processor<N> {
                 original_font_size: self.config.font.size,
                 message_buffer: &mut self.message_buffer,
                 resize_pending: &mut resize_pending,
-                window: &mut self.window,
+                window: &mut self.display.window,
             };
             let mut processor = input::Processor::new(context, &mut self.config);
 
             for event in event_queue.drain(..) {
-                Processor::handle_event(event, &mut processor, &mut redraw_requested);
+                Processor::handle_event(event, &mut processor);
             }
 
             // Process resize events
             if !resize_pending.is_empty() {
-                self.handle_resize(&mut terminal, resize_pending);
+                self.display.handle_resize(
+                    &mut terminal,
+                    self.pty_resize_handle.as_mut(),
+                    &self.message_buffer,
+                    &self.config,
+                    resize_pending,
+                );
             }
 
             // Send updates to render thread
-            if terminal.dirty && redraw_requested {
+            if terminal.dirty {
                 // Clear dirty flag
                 terminal.dirty = !terminal.visual_bell.completed();
-                redraw_requested = false;
 
-                // Update IME position
-                #[cfg(not(windows))]
-                self.window.update_ime_position(&terminal, &self.size_info);
-
-                // Request redraw
-                self.render_tx
-                    .send(RenderEvent::Draw(Box::new(FrameData {
-                        visual_bell_intensity: terminal.visual_bell.intensity(),
-                        background_color: terminal.background_color(),
-                        message_buffer: self.message_buffer.message().map(|m| m.to_owned()),
-                        grid_cells: terminal.renderable_cells(&self.config).collect(),
-                        size_info: self.size_info,
-                        background_opacity: self.config.background_opacity(),
-                        font_offset: (self.config.font.offset.x, self.config.font.offset.y),
-                        visual_bell_color: self.config.visual_bell.color,
-                        render_timer: self.config.render_timer(),
-                    })))
-                    .expect("send render update");
+                self.display.draw(terminal, &self.message_buffer, &self.config);
             }
         });
 
-        self.render_tx.send(RenderEvent::Exit).expect("send render exit");
-
         // Write ref tests to disk
         self.write_ref_test_results(&terminal.lock());
-    }
-
-    /// Process resize events
-    fn handle_resize<T>(&mut self, terminal: &mut Term<T>, resize_pending: Resize)
-    where
-        T: EventListener,
-    {
-        // Update the cell metrics with the new glyph dimensions
-        if let Some(size) = resize_pending.font_size {
-            let font = self.config.font.clone().with_size(size);
-            if let Ok(metrics) = GlyphCache::static_metrics(font, self.size_info.dpr) {
-                // Update cell size
-                let (cell_width, cell_height) =
-                    GlyphCache::compute_cell_size(&self.config, &metrics);
-                self.size_info.cell_width = cell_width;
-                self.size_info.cell_height = cell_height;
-            }
-        }
-
-        // Update the window dimensions
-        if let Some(size) = resize_pending.dimensions {
-            self.size_info.width = size.width as f32;
-            self.size_info.height = size.height as f32;
-        }
-
-        let dpr = self.size_info.dpr;
-        let width = self.size_info.width;
-        let height = self.size_info.height;
-        let cell_width = self.size_info.cell_width;
-        let cell_height = self.size_info.cell_height;
-
-        // Recalculate padding
-        let mut padding_x = f32::from(self.config.window.padding.x) * dpr as f32;
-        let mut padding_y = f32::from(self.config.window.padding.y) * dpr as f32;
-
-        if self.config.window.dynamic_padding {
-            padding_x = display::dynamic_padding(padding_x, width, cell_width);
-            padding_y = display::dynamic_padding(padding_y, height, cell_height);
-        }
-
-        self.size_info.padding_x = padding_x.floor() as f32;
-        self.size_info.padding_y = padding_y.floor() as f32;
-
-        let mut pty_size = self.size_info;
-
-        // Subtract message bar lines from pty size
-        if resize_pending.message_buffer.is_some() {
-            let lines =
-                self.message_buffer.message().map(|m| m.text(&self.size_info).len()).unwrap_or(0);
-            pty_size.height -= pty_size.cell_height * lines as f32;
-        }
-
-        // Resize PTY
-        self.pty_resize_handle.on_resize(&pty_size);
-
-        // Resize terminal
-        terminal.resize(&pty_size);
-
-        // Resize renderer
-        let font = resize_pending.font_size.map(|fs| self.config.font.clone().with_size(fs));
-        let _ = self.render_tx.send(RenderEvent::Resize(Box::new((self.size_info, font))));
     }
 
     // Write the ref test results to the disk
@@ -668,7 +580,7 @@ impl<N: Notify> Processor<N> {
 
         let serialized_grid = json::to_string(&grid).expect("serialize grid");
 
-        let serialized_size = json::to_string(&self.size_info).expect("serialize size");
+        let serialized_size = json::to_string(&self.display.size_info).expect("serialize size");
 
         let serialized_config = format!("{{\"history_size\":{}}}", grid.history_size());
 

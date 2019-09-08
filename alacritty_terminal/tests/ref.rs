@@ -98,7 +98,7 @@ fn ref_test(dir: &Path) {
     let mut config = MockConfig::default();
     config.scrolling.set_history(ref_config.history_size);
 
-    let mut terminal = Term::new(&config, size, Clipboard::new_nop(), Mock);
+    let mut terminal = Term::new(&config, &size, Clipboard::new_nop(), Mock);
     let mut parser = ansi::Processor::new();
 
     for byte in recording {

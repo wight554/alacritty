@@ -688,6 +688,7 @@ impl<'a, T: EventListener, A: ActionContext<T> + 'a> Processor<'a, T, A> {
         self.ctx.write_to_pty(bytes);
 
         *self.ctx.received_count() += 1;
+        self.ctx.terminal_mut().dirty = false;
     }
 
     /// Attempts to find a binding and execute its action
@@ -1001,7 +1002,7 @@ mod tests {
                     dpr: 1.0,
                 };
 
-                let mut terminal = Term::new(&cfg, size, Clipboard::new_nop(), MockEventProxy);
+                let mut terminal = Term::new(&cfg, &size, Clipboard::new_nop(), MockEventProxy);
 
                 let mut mouse = Mouse::default();
                 mouse.click_state = $initial_state;

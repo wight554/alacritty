@@ -29,20 +29,18 @@ use std::fs;
 use std::io::{self, Write};
 #[cfg(not(windows))]
 use std::os::unix::io::AsRawFd;
-use std::sync::mpsc;
 use std::sync::Arc;
 
 #[cfg(target_os = "macos")]
 use dirs;
 use glutin::event_loop::EventLoop as GlutinEventLoop;
-use glutin::{NotCurrent, PossiblyCurrent};
 use log::{error, info};
 #[cfg(windows)]
 use winapi::um::wincon::{AttachConsole, FreeConsole, ATTACH_PARENT_PROCESS};
 
 use alacritty_terminal::clipboard::Clipboard;
 use alacritty_terminal::die;
-use alacritty_terminal::event::{Event, EventListener};
+use alacritty_terminal::event::Event;
 use alacritty_terminal::event_loop::{self, EventLoop, Msg};
 #[cfg(target_os = "macos")]
 use alacritty_terminal::locale;
@@ -51,7 +49,6 @@ use alacritty_terminal::panic;
 use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::Term;
 use alacritty_terminal::tty;
-use alacritty_terminal::util;
 
 mod cli;
 mod config;
@@ -64,9 +61,8 @@ mod window;
 use crate::cli::Options;
 use crate::config::monitor::Monitor;
 use crate::config::Config;
-use crate::display::{Display, RenderEvent};
+use crate::display::Display;
 use crate::event::{EventProxy, Processor};
-use crate::window::WindowedContext;
 
 fn main() {
     panic::attach_handler();
@@ -143,21 +139,18 @@ fn run(window_event_loop: GlutinEventLoop<Event>, config: Config) -> Result<(), 
     // Set environment variables
     tty::setup_env(&config);
 
-    // Create the window
     let event_proxy = EventProxy::new(window_event_loop.create_proxy());
-    let WindowedContext { mut window, context } =
-        WindowedContext::new(&config, &window_event_loop)?;
 
-    // Create a display.
+    // Create a display
     //
-    // The display manages a window and can draw the terminal
-    let display = Display::new(&config, &mut window, context, event_proxy.clone())?;
+    // The display manages a window and can draw the terminal.
+    let display = Display::new(&config, &window_event_loop)?;
 
-    info!("PTY Dimensions: {:?} x {:?}", display.size().lines(), display.size().cols());
+    info!("PTY Dimensions: {:?} x {:?}", display.size_info.lines(), display.size_info.cols());
 
     // Create new native clipboard
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    let clipboard = Clipboard::new(window.wayland_display());
+    let clipboard = Clipboard::new(display.window.wayland_display());
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     let clipboard = Clipboard::new();
 
@@ -166,7 +159,7 @@ fn run(window_event_loop: GlutinEventLoop<Event>, config: Config) -> Result<(), 
     // This object contains all of the state about what's being displayed. It's
     // wrapped in a clonable mutex since both the I/O loop and display need to
     // access it.
-    let terminal = Term::new(&config, display.size().to_owned(), clipboard, event_proxy.clone());
+    let terminal = Term::new(&config, &display.size_info, clipboard, event_proxy.clone());
     let terminal = Arc::new(FairMutex::new(terminal));
 
     // Create the pty
@@ -174,9 +167,9 @@ fn run(window_event_loop: GlutinEventLoop<Event>, config: Config) -> Result<(), 
     // The pty forks a process to run the shell on the slave side of the
     // pseudoterminal. A file descriptor for the master side is retained for
     // reading/writing to the shell.
-    let pty = tty::new(&config, &display.size(), window.get_window_id());
+    let pty = tty::new(&config, &display.size_info, display.window.get_window_id());
 
-    // Get a reference to something that we can resize
+    // Create PTY resize handle
     //
     // This exists because rust doesn't know the interface is thread-safe
     // and we need to be able to resize the PTY from the main thread while the IO
@@ -196,7 +189,7 @@ fn run(window_event_loop: GlutinEventLoop<Event>, config: Config) -> Result<(), 
         EventLoop::new(Arc::clone(&terminal), event_proxy.clone(), pty, config.debug.ref_test);
 
     // The event loop channel allows write requests from the event processor
-    // to be sent to the loop and ultimately written to the pty.
+    // to be sent to the pty loop and ultimately written to the pty.
     let loop_tx = event_loop.channel();
 
     // Create a config monitor when config was loaded from path
@@ -210,60 +203,27 @@ fn run(window_event_loop: GlutinEventLoop<Event>, config: Config) -> Result<(), 
     // Setup storage for message UI
     let message_buffer = MessageBuffer::new();
 
-    // Render Queue
-    let (render_tx, render_rx) = mpsc::channel::<RenderEvent>();
-
     // Event processor
     //
     // Need the Rc<RefCell<_>> here since a ref is shared in the resize callback
-    //
-    // XXX: The processor needs to be dropped after the GL context,
-    //      so the window is not dropped before the context
     let mut processor = Processor::new(
-        event_loop::Notifier(event_loop.channel()),
-        display.size().to_owned(),
+        event_loop::Notifier(loop_tx.clone()),
         Box::new(resize_handle),
         message_buffer,
-        render_tx,
-        window,
         config,
+        display,
     );
 
     // Kick off the I/O thread
     let io_thread = event_loop.spawn();
 
-    // Deactivate display context to move it between threads
-    let display: Display<NotCurrent> = display.into();
-
-    let render_thread = util::thread::spawn_named("rendering", move || {
-        // Reactivate display context
-        let mut display: Display<PossiblyCurrent> = display.into();
-
-        // Request redraw
-        event_proxy.send_event(Event::RedrawRequest);
-
-        loop {
-            match render_rx.recv() {
-                Ok(RenderEvent::Draw(frame_data)) => {
-                    display.draw(*frame_data);
-
-                    // Request redraw
-                    event_proxy.send_event(Event::RedrawRequest);
-                },
-                Ok(RenderEvent::Resize(resize)) => display.resize(*resize),
-                Ok(RenderEvent::Exit) | Err(_) => break,
-            };
-        }
-    });
-
     info!("Initialisation complete");
 
     // Start event loop and block until shutdown
-    processor.process_events(terminal, window_event_loop);
+    processor.run(terminal, window_event_loop);
 
+    // Shutdown PTY parser event loop
     loop_tx.send(Msg::Shutdown).expect("Error sending shutdown to pty event loop");
-
-    render_thread.join().expect("join render thread");
     io_thread.join().expect("join io thread");
 
     // FIXME patch notify library to have a shutdown method

@@ -359,15 +359,6 @@ impl GlyphCache {
         rasterizer.metrics(regular, font.size)
     }
 
-    pub fn compute_cell_size<C>(config: &Config<C>, metrics: &font::Metrics) -> (f32, f32) {
-        let offset_x = f64::from(config.font.offset.x);
-        let offset_y = f64::from(config.font.offset.y);
-        (
-            f32::max(1., ((metrics.average_advance + offset_x) as f32).floor()),
-            f32::max(1., ((metrics.line_height + offset_y) as f32).floor()),
-        )
-    }
-
     pub fn calculate_dimensions<C>(
         config: &Config<C>,
         dpr: f64,
@@ -443,14 +434,13 @@ pub struct QuadRenderer {
 }
 
 #[derive(Debug)]
-pub struct RenderApi<'a> {
+pub struct RenderApi<'a, C> {
     active_tex: &'a mut GLuint,
     batch: &'a mut Batch,
     atlas: &'a mut Vec<Atlas>,
     current_atlas: &'a mut usize,
     program: &'a mut TextShaderProgram,
-    font_offset: (i8, i8),
-    background_opacity: f32,
+    config: &'a Config<C>,
 }
 
 #[derive(Debug)]
@@ -785,15 +775,9 @@ impl QuadRenderer {
         }
     }
 
-    pub fn with_api<F, T>(
-        &mut self,
-        props: &term::SizeInfo,
-        background_opacity: f32,
-        font_offset: (i8, i8),
-        func: F,
-    ) -> T
+    pub fn with_api<F, T, C>(&mut self, config: &Config<C>, props: &term::SizeInfo, func: F) -> T
     where
-        F: FnOnce(RenderApi<'_>) -> T,
+        F: FnOnce(RenderApi<'_, C>) -> T,
     {
         // Flush message queue
         if let Ok(Msg::ShaderReload) = self.rx.try_recv() {
@@ -817,8 +801,7 @@ impl QuadRenderer {
             atlas: &mut self.atlas,
             current_atlas: &mut self.current_atlas,
             program: &mut self.program,
-            background_opacity,
-            font_offset,
+            config,
         });
 
         unsafe {
@@ -877,7 +860,7 @@ impl QuadRenderer {
         self.rect_program = rect_program;
     }
 
-    pub fn resize(&mut self, size: SizeInfo) {
+    pub fn resize(&mut self, size: &SizeInfo) {
         // viewport
         unsafe {
             gl::Viewport(
@@ -932,14 +915,15 @@ impl QuadRenderer {
     }
 }
 
-impl<'a> RenderApi<'a> {
+impl<'a, C> RenderApi<'a, C> {
     pub fn clear(&self, color: Rgb) {
         unsafe {
+            let alpha = self.config.background_opacity();
             gl::ClearColor(
-                (f32::from(color.r) / 255.0).min(1.0) * self.background_opacity,
-                (f32::from(color.g) / 255.0).min(1.0) * self.background_opacity,
-                (f32::from(color.b) / 255.0).min(1.0) * self.background_opacity,
-                self.background_opacity,
+                (f32::from(color.r) / 255.0).min(1.0) * alpha,
+                (f32::from(color.g) / 255.0).min(1.0) * alpha,
+                (f32::from(color.b) / 255.0).min(1.0) * alpha,
+                alpha,
             );
             gl::Clear(gl::COLOR_BUFFER_BIT);
         }
@@ -1044,8 +1028,8 @@ impl<'a> RenderApi<'a> {
                     self.load_glyph(&get_cursor_glyph(
                         cursor_key.style,
                         metrics,
-                        self.font_offset.0,
-                        self.font_offset.1,
+                        self.config.font.offset.x,
+                        self.config.font.offset.y,
                         cursor_key.is_wide,
                     ))
                 });
@@ -1157,7 +1141,7 @@ impl<'a> LoadGlyph for LoaderApi<'a> {
     }
 }
 
-impl<'a> LoadGlyph for RenderApi<'a> {
+impl<'a, C> LoadGlyph for RenderApi<'a, C> {
     fn load_glyph(&mut self, rasterized: &RasterizedGlyph) -> Glyph {
         load_glyph(self.active_tex, self.atlas, self.current_atlas, rasterized)
     }
@@ -1167,7 +1151,7 @@ impl<'a> LoadGlyph for RenderApi<'a> {
     }
 }
 
-impl<'a> Drop for RenderApi<'a> {
+impl<'a, C> Drop for RenderApi<'a, C> {
     fn drop(&mut self) {
         if !self.batch.is_empty() {
             self.render_batch();
