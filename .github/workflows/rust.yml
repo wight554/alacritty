@@ -1,0 +1,29 @@
+name: Test on ${{ matrix.os }}
+
+on:
+  push:
+    branches:    
+      - master
+
+jobs:
+  build:
+
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+    - uses: actions/checkout@v1
+    - name: Install validators
+      run: ci/install.sh
+      shell: bash
+    - name: Build
+      run: ci/script.sh
+      shell: bash
+    - name: Prepare for deploy
+      run: ci/before_deploy.sh
+      shell: bash
+    - name:  Github Create Release
+      uses: frankjuniorr/github-create-release-action@v2.1.1
+      secrets: ["GITHUB_TOKEN"]
