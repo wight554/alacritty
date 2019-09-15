@@ -32,8 +32,8 @@ use alacritty_terminal::message_bar::MessageBuffer;
 use alacritty_terminal::meter::Meter;
 use alacritty_terminal::renderer::rects::{RenderLines, RenderRect};
 use alacritty_terminal::renderer::{self, GlyphCache, QuadRenderer};
-use alacritty_terminal::term::color::Rgb;
-use alacritty_terminal::term::{RenderableCell, SizeInfo, Term};
+use alacritty_terminal::term::{color::Rgb, RenderableCell, SizeInfo, Term};
+use alacritty_terminal::text_run::TextRunIter;
 
 use crate::config::Config;
 use crate::event::Resize;
@@ -231,16 +231,19 @@ impl Display {
         renderer: &mut QuadRenderer,
         config: &Config,
     ) -> Result<(GlyphCache, f32, f32), Error> {
-        let font = config.font.clone();
-        let rasterizer = font::Rasterizer::new(dpr as f32, config.font.use_thin_strokes())?;
+        let rasterizer = font::Rasterizer::new(
+            dpr as f32,
+            config.font.use_thin_strokes(),
+            config.font.ligatures(),
+        )?;
 
         // Initialize glyph cache
         let glyph_cache = {
             info!("Initializing glyph cache...");
             let init_start = Instant::now();
 
-            let cache =
-                renderer.with_loader(|mut api| GlyphCache::new(rasterizer, &font, &mut api))?;
+            let cache = renderer
+                .with_loader(|mut api| GlyphCache::new(rasterizer, &config.font, &mut api))?;
 
             let stop = init_start.elapsed();
             let stop_f = stop.as_secs() as f64 + f64::from(stop.subsec_nanos()) / 1_000_000_000f64;
@@ -367,20 +370,17 @@ impl Display {
             let mut lines = RenderLines::new();
 
             // Draw grid
-            {
-                let _sampler = self.meter.sampler();
+            self.renderer.with_api(&config, &size_info, |mut api| {
+                // Iterate over each contiguous block of text
+                for text_run in TextRunIter::new(grid_cells.into_iter()) {
+                    println!("{:?}", text_run);
+                    // Update underline/strikeout
+                    lines.update(&text_run);
 
-                self.renderer.with_api(&config, &size_info, |mut api| {
-                    // Iterate over all non-empty cells in the grid
-                    for cell in grid_cells {
-                        // Update underline/strikeout
-                        lines.update(cell);
-
-                        // Draw the cell
-                        api.render_cell(cell, glyph_cache);
-                    }
-                });
-            }
+                    // Draw text run
+                    api.render_text_run(text_run, glyph_cache);
+                }
+            });
 
             let mut rects = lines.into_rects(&metrics, &size_info);
 
