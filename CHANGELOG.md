@@ -44,6 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Use text mouse cursor when mouse mode is temporarily disabled with shift
 - Wayland primary selection clipboard not storing text when selection is stopped outside of the window
 - Block URL highlight while a selection is active
+- Background always opaque on X11
+- Skipping redraws on PTY update
+- Not redrawing while resizing on Windows/macOS
+- Decorations `none` launching an invisible window
 
 ## 0.3.3
 
