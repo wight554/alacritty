@@ -17,7 +17,7 @@ matrix:
           - libxcb-xfixes0-dev
     - os: windows
 rust:
-  - nightly
+  - stable
 install: ci/install.sh
 script: ci/script.sh
 before_deploy: ci/before_deploy.sh
