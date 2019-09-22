@@ -6,9 +6,11 @@ git:
 branches:
   only:
     - master
-os:
-  - linux
-  - windows
+matrix:
+    include:
+    - os: linux
+      dist: bionic
+    - os: windows
 rust:
   - nightly
 install: ci/install.sh
