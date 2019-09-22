@@ -10,6 +10,11 @@ matrix:
     include:
     - os: linux
       dist: bionic
+      addons:
+        apt:
+          packages:
+          - libxcb-shape0-dev
+          - libxcb-xfixes0-dev
     - os: windows
 rust:
   - nightly
