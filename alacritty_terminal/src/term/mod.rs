@@ -312,6 +312,13 @@ impl RenderableCell {
         }
     }
 
+    pub fn is_cursor(&self) -> bool {
+        match &self.inner {
+            RenderableCellContent::Cursor(_) => true,
+            _ => false,
+        }
+    }
+
     fn compute_fg_rgb<C>(
         config: &Config<C>,
         colors: &color::List,
